@@ -7,7 +7,10 @@
     "test": "tests"
   },
   "scripts": {
-    "test": "echo 'No node tests in notify service'"
+    "test": "echo 'No node tests in notify service'",
+    "checkpoint": "sh scripts/checkpoint/checkpoint.sh",
+    "checkpoint:fast": "pwsh scripts/checkpoint/checkpoint.ps1 -Tier fast",
+    "checkpoint:agent": "pwsh scripts/checkpoint/checkpoint.ps1 -Tier agent"
   },
   "repository": {
     "type": "git",
