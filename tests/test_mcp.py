@@ -153,3 +153,26 @@ def test_key_inativa_nao_da_acesso_a_conta(client, account, auth_headers):
                 headers=_auth(auth_headers))
     assert resp.status_code == 200
     assert _payload(resp)["app"] == "default"
+
+
+@pytest.mark.django_db
+def test_send_com_extra_recursos_ricos(client, account, auth_headers):
+    """notify_send suporta metadados/recursos ricos (poll, pix, location, etc.) via extra."""
+    resp = _rpc(client, "tools/call", {
+        "name": "notify_send",
+        "arguments": {
+            "text": "Qual seu horário preferido?",
+            "phone": "5542988887777",
+            "extra": {
+                "poll": {
+                    "question": "Qual seu horário preferido?",
+                    "options": ["Manhã", "Tarde", "Noite"],
+                    "selectable_count": 1,
+                }
+            },
+        },
+    }, headers=_auth(auth_headers))
+    assert resp.status_code == 200
+    data = _payload(resp)
+    n = Notification.objects.get(external_id=data["external_id"])
+    assert n.extra["poll"]["options"] == ["Manhã", "Tarde", "Noite"]

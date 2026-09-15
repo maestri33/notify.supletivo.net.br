@@ -101,3 +101,12 @@ def test_idempotencia_via_options_external_id(client, auth_headers):
     second = _post(client, auth_headers, **kw).json()["external_id"]
     assert first == second
     assert Notification.objects.filter(idempotency_key="pedido-77").count() == 1
+
+
+def test_idempotencia_com_string_vazia_nao_colide(client, auth_headers):
+    """external_id="" deve ser normalizado para None, permitindo múltiplos envios sem violar a constraint única."""
+    kw = dict(content="oi", whatsapp="5542999990000", options={"external_id": "   "})
+    first = _post(client, auth_headers, **kw).json()["external_id"]
+    second = _post(client, auth_headers, **kw).json()["external_id"]
+    assert first != second
+    assert Notification.objects.filter(idempotency_key=None).count() >= 2

@@ -74,7 +74,6 @@ def _check_and_heal_license(base: str) -> bool:
     admin_key = (
         getattr(settings, "EVOLUTION_GO_ADMIN_KEY", "")
         or getattr(settings, "GLOBAL_API_KEY", "")
-        or "621dbeb7c33b74cda265687b1d5e8d9e3f9a97ddfe2cbffec439124d884163e3"
     )
     try:
         resp = httpx.get(f"{base}/license/status", timeout=5.0)
@@ -90,6 +89,10 @@ def _check_and_heal_license(base: str) -> bool:
     except Exception as exc:  # noqa: BLE001
         logger.warning("watchdog.license_check_failed", error=str(exc))
         return True
+
+    if not admin_key:
+        logger.warning("watchdog.license_heal_skipped_no_admin_key")
+        return False
 
     logger.warning("watchdog.license_inactive_triggering_heal")
     try:

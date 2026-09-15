@@ -246,12 +246,6 @@ def _log_webhook(instance_name: str, payload: EvolutionWebhookIn) -> None:
             preview=preview_of(data)[:200],
             payload={"event": payload.event, "instance": payload.instance, "data": data},
         )
-        max_rows = int(getattr(settings, "WEBHOOK_LOG_MAX", 500))
-        vivos = list(
-            WebhookEvent.objects.order_by("-id").values_list("id", flat=True)[:max_rows]
-        )
-        if vivos:
-            WebhookEvent.objects.exclude(pk__in=vivos).delete()
     except Exception:  # noqa: BLE001
         logger.warning("notify.webhook.log_failed", instance=instance_name)
 
@@ -355,7 +349,10 @@ def stalwart_webhook(request, payload: StalwartWebhookIn):
     # 1. Casamento com Notification enviada
     notif = None
     if msg_id:
-        notif = Notification.objects.filter(provider_message_id=msg_id).first()
+        notif = (
+            Notification.objects.filter(provider_message_id=msg_id).first()
+            or Notification.objects.filter(extra__email_message_id=msg_id).first()
+        )
     if notif is None and recipient:
         notif = (
             Notification.objects.filter(recipient_email__iexact=recipient, want_email=True)
@@ -396,10 +393,13 @@ def stalwart_webhook(request, payload: StalwartWebhookIn):
     # 4. Mensagem de E-mail Recebida (Inbound)
     if any(k in event_name for k in ("message-received", "message.received", "inbound")):
         account = None
-        if sender:
-            ident = MailIdentity.objects.filter(from_email__iexact=sender).select_related("account").first()
-            if ident:
-                account = ident.account
+        target_email = (recipient or sender).strip().lower()
+        ident = (
+            MailIdentity.objects.filter(from_email__iexact=target_email).select_related("account").first()
+            or (MailIdentity.objects.filter(from_email__iexact=sender).select_related("account").first() if sender else None)
+        )
+        if ident:
+            account = ident.account
         if account:
             event = InboundEvent.objects.create(
                 account=account,

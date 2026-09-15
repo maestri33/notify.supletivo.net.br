@@ -77,6 +77,7 @@ def send(
 
     idempotency_key repetido (na mesma conta) devolve a notificação existente.
     """
+    idempotency_key = (idempotency_key or "").strip() or None
     if idempotency_key:
         existing = Notification.objects.filter(
             account=account, idempotency_key=idempotency_key
@@ -127,10 +128,13 @@ def send(
                 whatsapp_status=wa_status,
                 email_status=mail_status,
             )
-    except IntegrityError:
-        existing = Notification.objects.get(account=account, idempotency_key=idempotency_key)
-        logger.info("notify.idempotent_race", external_id=str(existing.external_id), caller=caller)
-        return str(existing.external_id)
+    except IntegrityError as exc:
+        if idempotency_key:
+            existing = Notification.objects.filter(account=account, idempotency_key=idempotency_key).first()
+            if existing is not None:
+                logger.info("notify.idempotent_race", external_id=str(existing.external_id), caller=caller)
+                return str(existing.external_id)
+        raise exc
 
     logger.info(
         "notify.queued",

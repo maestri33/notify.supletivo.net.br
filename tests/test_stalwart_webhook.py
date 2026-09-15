@@ -96,10 +96,11 @@ def test_stalwart_webhook_inbound_message(client, account, monkeypatch):
     inbound_pushed = []
     monkeypatch.setattr("notify.outbound.push_inbound", lambda ev: inbound_pushed.append(ev.id))
 
+    # Cenário real: remetente externo enviando para a caixa postal da identidade cadastrada
     payload = {
         "event": "smtp.message-received",
-        "sender": "suporte@v7m.org",
-        "recipient": "contato@cliente.com",
+        "sender": "contato@cliente.com",
+        "recipient": "suporte@v7m.org",
         "details": "E-mail de resposta recebido",
         "data": {"subject": "Re: Suporte"},
     }
@@ -111,6 +112,39 @@ def test_stalwart_webhook_inbound_message(client, account, monkeypatch):
     assert event is not None
     assert "E-mail de resposta recebido" in event.preview
     assert len(inbound_pushed) == 1
+
+
+@pytest.mark.django_db
+def test_stalwart_webhook_delivered_por_extra_email_message_id(client, account, monkeypatch):
+    """Quando o despacho é multicanal, provider_message_id pode ser do WhatsApp e email_message_id fica em extra."""
+    pushed = []
+    monkeypatch.setattr("notify.outbound.push_status", lambda n, stage=None: pushed.append((n.id, stage)))
+
+    notif = Notification.objects.create(
+        account=account,
+        recipient_email="cliente@example.com",
+        want_email=True,
+        email_status="sent",
+        provider_message_id="WA-MSG-8888",
+        extra={"email_message_id": "msg-multicanal-999@v7m.org"},
+        text="Olá mundo multicanal",
+    )
+
+    payload = {
+        "event": "delivery.delivered",
+        "messageId": "<msg-multicanal-999@v7m.org>",
+        "recipient": "outro@example.com",  # recipient diferente para garantir que casou pelo ID
+        "details": "250 OK",
+    }
+    resp = client.post("/v1/webhook/stalwart", data=payload, content_type="application/json")
+    assert resp.status_code == 200
+    assert resp.json()["handled"] == "delivered"
+
+    notif.refresh_from_db()
+    assert notif.delivery_status == "delivered"
+    assert notif.delivered_at is not None
+    assert len(pushed) == 1
+    assert pushed[0] == (notif.id, "delivery")
 
 
 @pytest.mark.django_db

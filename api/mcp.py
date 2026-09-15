@@ -44,6 +44,7 @@ class McpSendIn(BaseModel):
     external_id: str | None = Field(default=None, description="Chave de idempotência")
     caller: str = Field(default="mcp", description="Rótulo de origem para auditoria")
     account_id: str | None = Field(default=None, description="Slug/id da conta; ausente = conta default")
+    extra: dict[str, Any] | None = Field(default=None, description="Recursos ricos opcionais: poll, pix, location, contact, carousel, qr_code")
 
 
 class McpSendEventIn(BaseModel):
@@ -175,6 +176,7 @@ def _tool_send(account, args: dict) -> dict:
         media_type=args.get("media_type"),
         gender=args.get("gender"),
         idempotency_key=args.get("external_id"),
+        extra=args.get("extra"),
     )
     return {"external_id": ext, "queued": True}
 
