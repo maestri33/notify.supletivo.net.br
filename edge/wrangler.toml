@@ -1,0 +1,20 @@
+name = "notify-edge"
+main = "src/index.ts"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+ENVIRONMENT = "production"
+BACKEND_ORIGIN = "https://notify-backend.supletivo.net.br"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "notify-db"
+database_id = "635cce70-7b14-4974-a2d9-9bac7ca7aca4"
+
+[[r2_buckets]]
+binding = "MEDIA"
+bucket_name = "notify-media"
+
+[ai]
+binding = "AI"

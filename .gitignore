@@ -17,6 +17,7 @@ build/
 *.log
 deploy/local/backups/
 *.sql
+!edge/schema.sql
 node_modules/
 playwright-report/
 test-results/
