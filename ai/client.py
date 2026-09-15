@@ -50,6 +50,28 @@ def _headers() -> dict[str, str]:
     return headers
 
 
+def _cf_available() -> bool:
+    """Retorna True se Cloudflare Workers AI estiver habilitado com credenciais."""
+    return bool(
+        getattr(settings, "CLOUDFLARE_WORKERS_AI_ENABLED", False)
+        and getattr(settings, "CLOUDFLARE_ACCOUNT_ID", "")
+        and getattr(settings, "CLOUDFLARE_API_TOKEN", "")
+    )
+
+
+def _cf_run_url(model: str) -> str:
+    account_id = getattr(settings, "CLOUDFLARE_ACCOUNT_ID", "")
+    return f"https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/run/{model}"
+
+
+def _cf_headers() -> dict[str, str]:
+    token = getattr(settings, "CLOUDFLARE_API_TOKEN", "")
+    return {
+        "Authorization": f"Bearer {token}",
+        "User-Agent": "notify-server/1.0",
+    }
+
+
 def complete(
     prompt: str,
     *,
@@ -59,7 +81,65 @@ def complete(
     max_tokens: int = 1800,
     timeout: float | None = None,
 ) -> str:
-    """Uma volta de chat. Devolve o texto ou levanta AiError/AiUnavailable."""
+    """Uma volta de chat. Suporta Cloudflare Workers AI / AI Gateway e OmniRouter."""
+    messages: list[dict[str, str]] = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    messages.append({"role": "user", "content": prompt})
+
+    seconds = timeout or float(getattr(settings, "AI_TIMEOUT_S", DEFAULT_TIMEOUT_S))
+
+    # 1. Cloudflare Workers AI / AI Gateway se ativo
+    if _cf_available() or (model and model.startswith("@cf/")):
+        cf_model = model or getattr(settings, "CLOUDFLARE_AI_MODEL", "@cf/meta/llama-3.1-8b-instruct")
+        gw_url = (getattr(settings, "CLOUDFLARE_AI_GATEWAY_URL", "") or "").rstrip("/")
+
+        try:
+            if gw_url:
+                # OpenAI-compatible via Cloudflare AI Gateway
+                headers = {"Content-Type": "application/json", "User-Agent": "notify-server/1.0"}
+                token = getattr(settings, "CLOUDFLARE_API_TOKEN", "")
+                if token:
+                    headers["Authorization"] = f"Bearer {token}"
+                payload = {
+                    "model": cf_model,
+                    "messages": messages,
+                    "temperature": temperature,
+                    "max_tokens": max_tokens,
+                }
+                resp = httpx.post(f"{gw_url}/v1/chat/completions", json=payload, headers=headers, timeout=seconds)
+            else:
+                # Direto Cloudflare Workers AI REST API
+                headers = _cf_headers()
+                headers["Content-Type"] = "application/json"
+                payload = {
+                    "messages": messages,
+                    "max_tokens": max_tokens,
+                    "temperature": temperature,
+                }
+                resp = httpx.post(_cf_run_url(cf_model), json=payload, headers=headers, timeout=seconds)
+
+            if resp.status_code < 400:
+                data = resp.json()
+                # Cloudflare standard REST API returns {"result": {"response": "..."}}
+                # AI Gateway / OpenAI returns {"choices": [{"message": {"content": "..."}}]}
+                if "result" in data and isinstance(data["result"], dict) and "response" in data["result"]:
+                    text = data["result"]["response"]
+                elif "choices" in data and data["choices"]:
+                    text = data["choices"][0]["message"].get("content", "")
+                else:
+                    text = ""
+                logger.info("ai.completed.cloudflare", model=cf_model, chars=len(text or ""))
+                return (text or "").strip()
+        except Exception as exc:
+            logger.warning("ai.cloudflare.fallback", error=str(exc))
+            # Se CF falhar e OmniRouter não estiver configurado, levanta erro
+            if not _base_url():
+                if isinstance(exc, httpx.TimeoutException):
+                    raise AiUnavailable(f"Cloudflare AI não respondeu em {seconds:.0f}s") from exc
+                raise AiError(f"Cloudflare AI falhou: {exc}") from exc
+
+    # 2. Fallback ou padrão: OmniRouter
     base = _base_url()
     if not base:
         raise AiError("OMNIROUTER_URL não configurada")
@@ -111,10 +191,39 @@ def transcribe(
     model: str | None = None,
     timeout: float | None = None,
 ) -> str:
-    """Transcreve áudio (Voz para Texto) via OmniRouter (/v1/audio/transcriptions).
+    """Transcreve áudio (Voz para Texto) via Cloudflare Workers AI ou OmniRouter.
 
     Devolve o texto transcrito ou levanta AiError/AiUnavailable.
     """
+    seconds = timeout or float(getattr(settings, "AI_TIMEOUT_S", DEFAULT_TIMEOUT_S))
+
+    # 1. Cloudflare Workers AI Whisper se ativo
+    if _cf_available() or (model and model.startswith("@cf/")):
+        cf_model = model or getattr(settings, "CLOUDFLARE_AI_STT_MODEL", "@cf/openai/whisper")
+        try:
+            url = _cf_run_url(cf_model)
+            cf_headers = _cf_headers()
+            cf_headers["Content-Type"] = "application/octet-stream"
+            resp = httpx.post(url, content=audio_bytes, headers=cf_headers, timeout=seconds)
+            if resp.status_code < 400:
+                data = resp.json()
+                text = ""
+                if "result" in data and isinstance(data["result"], dict):
+                    text = data["result"].get("text", "")
+                elif "text" in data:
+                    text = data["text"]
+                logger.info("ai.transcribed.cloudflare", model=cf_model, chars=len(text or ""))
+                return (text or "").strip()
+        except Exception as exc:
+            logger.warning("ai.cloudflare.stt_fallback", error=str(exc))
+            if not _base_url():
+                if isinstance(exc, httpx.TimeoutException):
+                    raise AiUnavailable(
+                        f"Cloudflare AI não respondeu em {seconds:.0f}s — transcrição indisponível"
+                    ) from exc
+                raise AiError(f"Cloudflare AI STT falhou: {exc}") from exc
+
+    # 2. Fallback ou padrão: OmniRouter
     base = _base_url()
     if not base:
         raise AiError("OMNIROUTER_URL não configurada")
@@ -222,25 +331,54 @@ def probe_chat_completions(
 def generate_image(
     prompt: str,
     *,
-    base_url: str = "http://10.0.1.35",
-    api_key: str = "sk-d3786a77f7a483da-d7292e-5e7de527",
-    model: str = "aihorde/stable_diffusion",
+    base_url: str | None = None,
+    api_key: str | None = None,
+    model: str | None = None,
     size: str = "512x512",
     timeout: float = 60.0,
 ) -> bytes:
-    """Gera imagem/logo via IA (/v1/images/generations). Retorna os bytes da imagem."""
+    """Gera imagem/logo via IA (/v1/images/generations ou Cloudflare Workers AI). Retorna os bytes da imagem."""
     import base64
 
-    endpoint = f"{base_url.rstrip('/')}/v1/images/generations"
+    # 1. Cloudflare Workers AI se habilitado ou modelo @cf/
+    if _cf_available() or (model and model.startswith("@cf/")):
+        cf_model = model or getattr(settings, "CLOUDFLARE_AI_IMAGE_MODEL", "@cf/black-forest-labs/flux-1-schnell")
+        try:
+            url = _cf_run_url(cf_model)
+            cf_headers = _cf_headers()
+            cf_headers["Content-Type"] = "application/json"
+            resp = httpx.post(url, json={"prompt": prompt}, headers=cf_headers, timeout=timeout)
+            if resp.status_code < 400:
+                if resp.headers.get("content-type", "").startswith("image/"):
+                    return resp.content
+                data = resp.json()
+                if "result" in data and isinstance(data["result"], dict) and "image" in data["result"]:
+                    return base64.b64decode(data["result"]["image"])
+                if "image" in data:
+                    return base64.b64decode(data["image"])
+                return resp.content
+        except Exception as exc:
+            logger.warning("ai.cloudflare.image_fallback", error=str(exc))
+            if not base_url and not _base_url():
+                raise AiError(f"Cloudflare AI Image falhou: {exc}") from exc
+
+    # 2. Fallback ou padrão: OmniRouter / OpenAI-compatível
+    resolved_base = (base_url or _base_url() or "").rstrip("/")
+    if not resolved_base:
+        raise AiError("URL do gateway de IA não configurada")
+
+    endpoint = f"{resolved_base}/v1/images/generations"
     headers = {
         "Content-Type": "application/json",
         "User-Agent": "notify-server/1.0",
     }
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
+    resolved_key = api_key if api_key is not None else getattr(settings, "OMNIROUTER_API_KEY", "")
+    if resolved_key:
+        headers["Authorization"] = f"Bearer {resolved_key}"
 
+    chosen_model = model or "aihorde/stable_diffusion"
     payload = {
-        "model": model,
+        "model": chosen_model,
         "prompt": prompt,
         "n": 1,
         "size": size,

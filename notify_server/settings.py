@@ -108,6 +108,23 @@ DATA_UPLOAD_MAX_NUMBER_FIELDS = 10000
 EXTERNAL_URL = env("EXTERNAL_URL", default="")
 MEDIA_LAN_BASE = env("MEDIA_LAN_BASE", default="")
 
+# ── Cloudflare R2 (Object Storage / Zero Egress) ───────────────────────────
+R2_ENABLED = env.bool("R2_ENABLED", default=False)
+R2_ACCOUNT_ID = env("R2_ACCOUNT_ID", default="")
+R2_ACCESS_KEY_ID = env("R2_ACCESS_KEY_ID", default="")
+R2_SECRET_ACCESS_KEY = env("R2_SECRET_ACCESS_KEY", default="")
+R2_BUCKET_NAME = env("R2_BUCKET_NAME", default="notify-media")
+R2_PUBLIC_URL = env("R2_PUBLIC_URL", default="")
+
+# ── Cloudflare Workers AI & AI Gateway (Serverless Edge AI) ─────────────────
+CLOUDFLARE_ACCOUNT_ID = env("CLOUDFLARE_ACCOUNT_ID", default="")
+CLOUDFLARE_API_TOKEN = env("CLOUDFLARE_API_TOKEN", default="")
+CLOUDFLARE_AI_GATEWAY_URL = env("CLOUDFLARE_AI_GATEWAY_URL", default="")
+CLOUDFLARE_WORKERS_AI_ENABLED = env.bool("CLOUDFLARE_WORKERS_AI_ENABLED", default=False)
+CLOUDFLARE_AI_MODEL = env("CLOUDFLARE_AI_MODEL", default="@cf/meta/llama-3.1-8b-instruct")
+CLOUDFLARE_AI_STT_MODEL = env("CLOUDFLARE_AI_STT_MODEL", default="@cf/openai/whisper")
+CLOUDFLARE_AI_IMAGE_MODEL = env("CLOUDFLARE_AI_IMAGE_MODEL", default="@cf/black-forest-labs/flux-1-schnell")
+
 # ── Omnirouter (OmniRoute HA Cluster via Cloudflare Ingress) ───
 OMNIROUTER_URL = env("OMNIROUTER_URL", default="https://ai.v7m.live")
 OMNIROUTER_API_KEY = env("OMNIROUTER_API_KEY", default="")

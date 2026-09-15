@@ -26,6 +26,23 @@ def build_qr_media_url(external_id: object, data: str) -> str:
     if len(value) > MAX_QR_DATA_LENGTH:
         raise ValueError(f"conteúdo do QR Code excede {MAX_QR_DATA_LENGTH} caracteres")
 
+    digest = hashlib.sha256(value.encode("utf-8")).hexdigest()[:16]
+    safe_id = "".join(char for char in str(external_id) if char.isalnum() or char in "-_")
+    filename = f"{safe_id or 'notification'}-{digest}.png"
+
+    from notify.r2 import is_r2_configured, upload_to_r2
+
+    if is_r2_configured():
+        import io
+        import qrcode
+
+        image = qrcode.make(value)
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+        r2_url = upload_to_r2(buffer.getvalue(), f"qr/{filename}", content_type="image/png")
+        if r2_url:
+            return r2_url
+
     base = str(
         getattr(settings, "EXTERNAL_URL", "")
         or getattr(settings, "MEDIA_LAN_BASE", "")
@@ -37,9 +54,6 @@ def build_qr_media_url(external_id: object, data: str) -> str:
     media_root = Path(str(settings.MEDIA_ROOT))
     qr_dir = media_root / "qr"
     qr_dir.mkdir(parents=True, exist_ok=True)
-    digest = hashlib.sha256(value.encode("utf-8")).hexdigest()[:16]
-    safe_id = "".join(char for char in str(external_id) if char.isalnum() or char in "-_")
-    filename = f"{safe_id or 'notification'}-{digest}.png"
     target = qr_dir / filename
 
     if not target.exists():
