@@ -116,6 +116,16 @@ R2_SECRET_ACCESS_KEY = env("R2_SECRET_ACCESS_KEY", default="")
 R2_BUCKET_NAME = env("R2_BUCKET_NAME", default="notify-media")
 R2_PUBLIC_URL = env("R2_PUBLIC_URL", default="")
 
+# ── Infisical (Cofre Centralizado de Segredos http://10.0.1.61:8080) ─────────
+INFISICAL_ENABLED = env.bool("INFISICAL_ENABLED", default=False)
+INFISICAL_BASE_URL = env("INFISICAL_BASE_URL", default="http://10.0.1.61:8080")
+INFISICAL_PROJECT_ID = env("INFISICAL_PROJECT_ID", default="1712fb45-2d75-4024-bc6b-0163d5e582a0")
+INFISICAL_CLIENT_ID = env("INFISICAL_CLIENT_ID", default=env("INFISICAL_UNIVERSAL_AUTH_CLIENT_ID", default=""))
+INFISICAL_CLIENT_SECRET = env("INFISICAL_CLIENT_SECRET", default=env("INFISICAL_UNIVERSAL_AUTH_CLIENT_SECRET", default=""))
+INFISICAL_TOKEN = env("INFISICAL_TOKEN", default="")
+INFISICAL_ENVIRONMENT = env("INFISICAL_ENVIRONMENT", default=env("ENVIRONMENT", default="dev"))
+INFISICAL_CACHE_TTL_S = env.float("INFISICAL_CACHE_TTL_S", default=300.0)
+
 # ── Cloudflare Workers AI & AI Gateway (Serverless Edge AI) ─────────────────
 CLOUDFLARE_ACCOUNT_ID = env("CLOUDFLARE_ACCOUNT_ID", default="")
 CLOUDFLARE_API_TOKEN = env("CLOUDFLARE_API_TOKEN", default="")

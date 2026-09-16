@@ -1,0 +1,101 @@
+name: CI / CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  backend-test:
+    name: Backend Test Suite (Python 3.12)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Django System Check
+        run: |
+          python manage.py check --settings=tests.settings
+
+      - name: Run Pytest Test Suite
+        env:
+          DJANGO_SETTINGS_MODULE: tests.settings
+        run: |
+          pytest -v
+
+  edge-check:
+    name: Cloudflare Edge Worker Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: 'edge/package-lock.json'
+
+      - name: Install Edge Dependencies
+        working-directory: edge
+        run: |
+          npm ci
+
+      - name: Typecheck TypeScript Worker
+        working-directory: edge
+        run: |
+          npx tsc --noEmit
+
+  version-oracle-bump:
+    name: Platform Version Oracle Bump
+    needs: [backend-test, edge-check]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Register Release on version.v7m.live
+        env:
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+          COMMIT_SHA: ${{ github.sha }}
+          VERSION_BUMP_TOKEN: ${{ secrets.VERSION_BUMP_TOKEN }}
+        run: |
+          if [ -z "$VERSION_BUMP_TOKEN" ]; then
+            echo "Skipping version bump: VERSION_BUMP_TOKEN secret is not set."
+            exit 0
+          fi
+
+          echo "Querying current version from version.v7m.live..."
+          CURRENT_VERSION=$(curl -s https://version.v7m.live/api/version | grep -o '"version": "[^"]*' | cut -d'"' -f4 || echo "0.0.0-sandbox.11")
+          echo "Current platform version: $CURRENT_VERSION"
+
+          jq -n \
+            --arg module "notify.supletivo.net.br" \
+            --arg version "$CURRENT_VERSION" \
+            --arg summary "$COMMIT_MSG" \
+            --arg commit "$COMMIT_SHA" \
+            --arg auth "GitHub Actions CI/CD" \
+            --arg type "patch" \
+            '{module: $module, version: $version, summary: $summary, commit: $commit, authorized_by: $auth, type: $type}' | \
+          curl -s -X POST https://version.v7m.live/api/version/bump \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $VERSION_BUMP_TOKEN" \
+            -d @- || echo "Warning: version bump webhook call returned non-zero status"

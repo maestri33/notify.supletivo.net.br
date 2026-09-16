@@ -1,10 +1,24 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 
+export type NotifyQueueMessage = {
+  notification_id: string;
+  account_slug: string;
+  channel: string;
+  recipient: string;
+  subject?: string;
+  payload: Record<string, any>;
+  is_otp?: boolean;
+  auth_header?: string;
+  target_path?: string;
+  timestamp: string;
+};
+
 export type Env = {
   DB: D1Database;
   MEDIA: R2Bucket;
   AI: any;
+  NOTIFY_QUEUE?: Queue<NotifyQueueMessage>;
   ENVIRONMENT: string;
   BACKEND_ORIGIN: string;
   BACKEND_SERVICE_TOKEN?: string;
@@ -143,11 +157,41 @@ const handleSend = async (c: any) => {
     )
     .run();
 
-  // 3. Encaminhamento para o backend Proxmox via Tunnel / Cloudflare Access
+  // 3. Encaminhamento assíncrono via Cloudflare Queue (ou direto ao Proxmox via Tunnel)
   let backendResult: any = { status: 'queued', notification_id: notificationId };
-  if (c.env.BACKEND_ORIGIN) {
+  const targetPath = c.req.path.startsWith('/notify') ? '/notify' : '/v1/send';
+  const shouldEnqueue = !isOtp && body.run_sync !== true && (body.enqueue === true || body.options?.enqueue === true || body.async === true);
+
+  if (shouldEnqueue && c.env.NOTIFY_QUEUE) {
     try {
-      const targetPath = c.req.path.startsWith('/notify') ? '/notify' : '/v1/send';
+      await c.env.NOTIFY_QUEUE.send({
+        notification_id: notificationId,
+        account_slug: accountSlug,
+        channel,
+        recipient,
+        subject,
+        payload: body,
+        is_otp: isOtp,
+        auth_header: c.req.header('Authorization'),
+        target_path: targetPath,
+        timestamp: new Date().toISOString(),
+      });
+      backendResult = {
+        status: 'queued',
+        notification_id: notificationId,
+        external_id: notificationId,
+        queue: 'notify-events',
+      };
+    } catch (qErr: any) {
+      backendResult = {
+        status: 'queued_edge',
+        notification_id: notificationId,
+        external_id: notificationId,
+        warning: `Queue send error: ${qErr.message}`,
+      };
+    }
+  } else if (c.env.BACKEND_ORIGIN) {
+    try {
       const backendUrl = `${c.env.BACKEND_ORIGIN.replace(/\/$/, '')}${targetPath}`;
       const backendHeaders: Record<string, string> = {
         'Content-Type': 'application/json',
@@ -174,20 +218,73 @@ const handleSend = async (c: any) => {
 
       if (resp.ok) {
         backendResult = await resp.json();
+      } else {
+        // Se backend falhar e não for OTP, tenta enfileirar para absorção resiliente
+        if (!isOtp && c.env.NOTIFY_QUEUE) {
+          await c.env.NOTIFY_QUEUE.send({
+            notification_id: notificationId,
+            account_slug: accountSlug,
+            channel,
+            recipient,
+            subject,
+            payload: body,
+            is_otp: false,
+            auth_header: auth,
+            target_path: targetPath,
+            timestamp: new Date().toISOString(),
+          });
+          backendResult = {
+            status: 'queued',
+            notification_id: notificationId,
+            external_id: notificationId,
+            queue: 'notify-events-fallback',
+          };
+        }
       }
     } catch (err: any) {
-      // Fallback: se o backend falhar momentaneamente, a notificação permanece no D1 para retry
-      backendResult = {
-        status: 'queued_edge',
-        notification_id: notificationId,
-        warning: 'Backend dispatch deferred to queue',
-      };
+      if (!isOtp && c.env.NOTIFY_QUEUE) {
+        try {
+          await c.env.NOTIFY_QUEUE.send({
+            notification_id: notificationId,
+            account_slug: accountSlug,
+            channel,
+            recipient,
+            subject,
+            payload: body,
+            is_otp: false,
+            auth_header: c.req.header('Authorization'),
+            target_path: targetPath,
+            timestamp: new Date().toISOString(),
+          });
+          backendResult = {
+            status: 'queued',
+            notification_id: notificationId,
+            external_id: notificationId,
+            queue: 'notify-events-fallback',
+          };
+        } catch {
+          backendResult = {
+            status: 'queued_edge',
+            notification_id: notificationId,
+            external_id: notificationId,
+            warning: 'Backend dispatch deferred to queue',
+          };
+        }
+      } else {
+        backendResult = {
+          status: 'queued_edge',
+          notification_id: notificationId,
+          external_id: notificationId,
+          warning: 'Backend dispatch deferred to queue',
+        };
+      }
     }
   }
 
   const responsePayload = {
     ok: true,
     notification_id: notificationId,
+    external_id: notificationId,
     status: backendResult.status || 'queued',
     timestamp: new Date().toISOString(),
     ...backendResult,
@@ -327,4 +424,85 @@ app.post('/mcp', async (c) => {
   });
 });
 
-export default app;
+// ── 5. Cloudflare Queue Consumer Handler ───────────────────────────────────
+export const queueHandler = async (
+  batch: MessageBatch<NotifyQueueMessage>,
+  env: Env,
+  ctx: ExecutionContext
+): Promise<void> => {
+  if (!env.BACKEND_ORIGIN) {
+    batch.ackAll();
+    return;
+  }
+
+  await Promise.allSettled(
+    batch.messages.map(async (message) => {
+      const item = message.body;
+      try {
+        const targetPath = item.target_path || '/v1/send';
+        const backendUrl = `${env.BACKEND_ORIGIN.replace(/\/$/, '')}${targetPath}`;
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json',
+          'X-Notification-ID': item.notification_id,
+          'X-Account-Slug': item.account_slug,
+        };
+
+        if (item.auth_header) {
+          headers['Authorization'] = item.auth_header;
+        }
+
+        if (item.is_otp) {
+          headers['X-Priority-Queue'] = 'fast-track';
+        }
+
+        if (env.BACKEND_SERVICE_TOKEN) {
+          headers['CF-Access-Client-Secret'] = env.BACKEND_SERVICE_TOKEN;
+        }
+
+        // Garante atribuição multi-tenant no corpo JSON para o auth do backend
+        const dispatchPayload = {
+          ...item.payload,
+          account_id: item.payload?.account_id || item.account_slug,
+        };
+
+        const resp = await fetch(backendUrl, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(dispatchPayload),
+        });
+
+        if (resp.ok) {
+          message.ack();
+          if (env.DB) {
+            ctx.waitUntil(
+              env.DB.prepare("UPDATE notifications SET status = 'dispatched' WHERE id = ?")
+                .bind(item.notification_id)
+                .run()
+            );
+          }
+        } else if (resp.status === 429 || resp.status === 408 || resp.status >= 500) {
+          // Rate limiting (429), timeout (408) ou falha de servidor (5xx): reagenda na fila
+          message.retry();
+        } else {
+          // Erro 4xx de cliente/validação (400, 404, 422): ack para não reter na fila
+          message.ack();
+          if (env.DB) {
+            ctx.waitUntil(
+              env.DB.prepare("UPDATE notifications SET status = 'failed' WHERE id = ?")
+                .bind(item.notification_id)
+                .run()
+            );
+          }
+        }
+      } catch (err) {
+        // Erro de rede ou timeout: reagenda
+        message.retry();
+      }
+    })
+  );
+};
+
+export default {
+  fetch: app.fetch,
+  queue: queueHandler,
+};
