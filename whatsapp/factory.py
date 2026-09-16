@@ -83,3 +83,66 @@ def get_driver(target=None, *, feature: str | None = None):
         or getattr(settings, "WHATSAPP_DRIVER", DRIVER_GO)
     )
     return build_driver(driver_name, instance_name=instance_name)
+
+
+def get_active_evolution_pool(account=None) -> list:
+    """Retorna lista de instâncias WhatsAppNumber ativas com connection_status='open'.
+
+    Prioriza:
+    1. Instância default da conta;
+    2. Demais instâncias da conta;
+    3. Instâncias globais abertas do sistema.
+    """
+    from channels.models import WhatsAppNumber
+
+    pool = []
+    seen_ids = set()
+
+    if account:
+        account_numbers = list(
+            WhatsAppNumber.objects.filter(account=account, connection_status="open")
+            .order_by("-is_default", "id")
+        )
+        for num in account_numbers:
+            if num.id not in seen_ids:
+                seen_ids.add(num.id)
+                pool.append(num)
+
+    global_numbers = list(
+        WhatsAppNumber.objects.filter(connection_status="open")
+        .exclude(id__in=seen_ids)
+        .order_by("-is_default", "id")
+    )
+    pool.extend(global_numbers)
+    return pool
+
+
+def get_otp_whatsapp_driver(notif=None, *, timeout: float = 3.0) -> WhatsAppDriver:
+    """Constrói driver prioritário de baixa latência para OTP com timeout rígido de 3.0s e fallback imediato."""
+    from whatsapp.cascade import CascadeDriver
+    from whatsapp.evolution_go import EvolutionGoDriver
+
+    account = getattr(notif, "account", None)
+    pool = get_active_evolution_pool(account)
+
+    if not pool:
+        wa_number = getattr(notif, "whatsapp_number", None) or getattr(notif, "wa_number", None)
+        if wa_number:
+            return EvolutionGoDriver(api_key=wa_number.go_api_key(), timeout=timeout)
+        return EvolutionGoDriver(timeout=timeout)
+
+    if len(pool) == 1:
+        num = pool[0]
+        return EvolutionGoDriver(api_key=num.go_api_key(), timeout=timeout)
+
+    # Pool multi-instâncias: cria cascata rápida com fallback imediato
+    # Nome do driver limitado a 20 chars para compatibilidade estrita com coluna driver_used
+    builders: list[tuple[str, Callable[[], WhatsAppDriver]]] = [
+        (
+            f"go:{num.instance_name}"[:20],
+            (lambda n=num: EvolutionGoDriver(api_key=n.go_api_key(), timeout=timeout)),
+        )
+        for num in pool[:3]
+    ]
+    return CascadeDriver(builders, immediate_fallback=True)
+

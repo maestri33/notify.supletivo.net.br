@@ -76,39 +76,57 @@ const handleSend = async (c: any) => {
     return c.json({ error: 'Invalid JSON payload' }, 400);
   }
 
-  const {
-    channel,
-    recipient,
-    subject = '',
-    content = '',
-    template_slug = '',
-    template_params = {},
-    idempotency_key = null,
-    extra = {},
-  } = body;
+  const recipient = body.recipient || body.whatsapp || body.phone || body.email || '';
+  const channel = body.channel || (body.whatsapp || body.phone ? 'whatsapp' : body.email ? 'email' : 'all');
+  const content = body.content || body.text || '';
+  const subject = body.subject || body.options?.subject || '';
+  const idempotency_key = body.idempotency_key || body.external_id || body.options?.external_id || null;
 
-  if (!channel || !recipient) {
-    return c.json({ error: 'Missing mandatory fields: channel, recipient' }, 400);
+  if (!recipient && !content) {
+    return c.json({ error: 'Missing mandatory fields: recipient/whatsapp/email and content/text are required' }, 400);
   }
 
-  // 1. Verificação de idempotência no D1
+  const accountSlug = c.req.header('X-Account-Slug') || body.account_id || 'default';
+  const caller = body.caller || body.options?.caller || body.extra?.caller || '';
+  const isOtp =
+    caller === 'users.auth.otp' ||
+    body.is_otp === true ||
+    body.options?.is_otp === true ||
+    body.extra?.is_otp === true;
+
+  // 1. Verificação de idempotência no D1 com suporte a cooldown inteligente de OTP (60s)
   if (idempotency_key) {
     const existing: any = await c.env.DB.prepare(
-      'SELECT response_json FROM idempotency_keys WHERE key = ?'
+      'SELECT response_json, created_at, expires_at, caller FROM idempotency_keys WHERE account_slug = ? AND key = ?'
     )
-      .bind(idempotency_key)
+      .bind(accountSlug, idempotency_key)
       .first();
 
     if (existing) {
-      const cached = JSON.parse(existing.response_json);
-      c.header('X-Idempotent-Replay', 'true');
-      return c.json(cached);
+      const isExistingOtp = isOtp || existing.caller === 'users.auth.otp';
+      const rawDate = existing.created_at || '';
+      const isoDate = rawDate.includes('T') ? rawDate : rawDate.replace(' ', 'T') + 'Z';
+      const createdAtMs = new Date(isoDate).getTime();
+      const ageMs = Date.now() - createdAtMs;
+
+      // Se for OTP: dentro de 60s retorna o replay. Passados 60s, permite novo envio legítimo.
+      if (isExistingOtp) {
+        if (ageMs < 60000) {
+          const cached = JSON.parse(existing.response_json);
+          c.header('X-Idempotent-Replay', 'true');
+          c.header('X-OTP-Cooldown-Remaining-S', Math.max(0, Math.ceil((60000 - ageMs) / 1000)).toString());
+          return c.json(cached);
+        }
+      } else {
+        const cached = JSON.parse(existing.response_json);
+        c.header('X-Idempotent-Replay', 'true');
+        return c.json(cached);
+      }
     }
   }
 
   // 2. Registro preliminar na borda (D1)
   const notificationId = crypto.randomUUID();
-  const accountSlug = c.req.header('X-Account-Slug') || 'default';
 
   await c.env.DB.prepare(
     `INSERT INTO notifications (id, account_slug, channel, recipient, subject, status, idempotency_key, payload_json)
@@ -129,12 +147,17 @@ const handleSend = async (c: any) => {
   let backendResult: any = { status: 'queued', notification_id: notificationId };
   if (c.env.BACKEND_ORIGIN) {
     try {
-      const backendUrl = `${c.env.BACKEND_ORIGIN.replace(/\/$/, '')}/v1/send`;
+      const targetPath = c.req.path.startsWith('/notify') ? '/notify' : '/v1/send';
+      const backendUrl = `${c.env.BACKEND_ORIGIN.replace(/\/$/, '')}${targetPath}`;
       const backendHeaders: Record<string, string> = {
         'Content-Type': 'application/json',
         'X-Notification-ID': notificationId,
         'X-Account-Slug': accountSlug,
       };
+
+      if (isOtp) {
+        backendHeaders['X-Priority-Queue'] = 'fast-track';
+      }
 
       const auth = c.req.header('Authorization');
       if (auth) backendHeaders['Authorization'] = auth;
@@ -170,13 +193,14 @@ const handleSend = async (c: any) => {
     ...backendResult,
   };
 
-  // 4. Salvar resposta para idempotência se chave fornecida
+  // 4. Salvar resposta para idempotência se chave fornecida (com TTL de 60s se for OTP)
   if (idempotency_key) {
+    const expiresAt = isOtp ? new Date(Date.now() + 60000).toISOString() : null;
     await c.env.DB.prepare(
-      `INSERT OR REPLACE INTO idempotency_keys (key, account_slug, response_json)
-       VALUES (?, ?, ?)`
+      `INSERT OR REPLACE INTO idempotency_keys (key, account_slug, response_json, caller, created_at, expires_at)
+       VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, ?)`
     )
-      .bind(idempotency_key, accountSlug, JSON.stringify(responsePayload))
+      .bind(idempotency_key, accountSlug, JSON.stringify(responsePayload), caller || null, expiresAt)
       .run();
   }
 

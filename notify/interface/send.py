@@ -78,13 +78,30 @@ def send(
     idempotency_key repetido (na mesma conta) devolve a notificação existente.
     """
     idempotency_key = (idempotency_key or "").strip() or None
+    is_otp = caller == "users.auth.otp" or bool((extra or {}).get("is_otp"))
+    if is_otp:
+        run_sync = True
+
     if idempotency_key:
         existing = Notification.objects.filter(
             account=account, idempotency_key=idempotency_key
         ).first()
         if existing is not None:
-            logger.info("notify.idempotent_hit", external_id=str(existing.external_id), caller=caller)
-            return str(existing.external_id)
+            if is_otp:
+                from datetime import timedelta
+                from django.utils import timezone
+
+                # Cooldown de 60s para OTP: dentro de 60s reutiliza; após 60s renova envio legítimo
+                if existing.created_at >= timezone.now() - timedelta(seconds=60):
+                    logger.info("notify.idempotent_hit.otp_cooldown", external_id=str(existing.external_id), caller=caller)
+                    return str(existing.external_id)
+                else:
+                    expired_key = f"{idempotency_key}__exp__{int(existing.created_at.timestamp())}"
+                    Notification.objects.filter(id=existing.id).update(idempotency_key=expired_key)
+                    logger.info("notify.idempotent_expired.otp_renewed", previous_id=str(existing.external_id), caller=caller)
+            else:
+                logger.info("notify.idempotent_hit", external_id=str(existing.external_id), caller=caller)
+                return str(existing.external_id)
 
     if media_url:
         _validate_media_url(media_url)

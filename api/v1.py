@@ -166,6 +166,7 @@ class SendIn(Schema):
     mail_template: str = Field(default="default", max_length=50)
     external_id: str | None = Field(default=None, max_length=255, description="idempotency_key do cliente")
     run_sync: bool = Field(default=False, description="Execução síncrona imediata")
+    extra: dict[str, Any] | None = Field(default=None, description="Metadados extras e flags (ex: is_otp)")
 
 
 class SendOut(Schema):
@@ -199,6 +200,7 @@ def api_send(request, payload: SendIn):
         mail_template=payload.mail_template,
         idempotency_key=payload.external_id,
         run_sync=payload.run_sync,
+        extra=payload.extra,
     )
     return {"external_id": ext}
 

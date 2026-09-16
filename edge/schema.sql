@@ -13,7 +13,9 @@ CREATE TABLE IF NOT EXISTS idempotency_keys (
     key TEXT NOT NULL,
     account_slug TEXT NOT NULL,
     response_json TEXT NOT NULL,
+    caller TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    expires_at DATETIME,
     PRIMARY KEY (account_slug, key)
 );
 
@@ -32,3 +34,4 @@ CREATE TABLE IF NOT EXISTS notifications (
 CREATE INDEX IF NOT EXISTS idx_notifications_account ON notifications(account_slug, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_notifications_recipient ON notifications(recipient);
 CREATE INDEX IF NOT EXISTS idx_idempotency_created ON idempotency_keys(created_at);
+CREATE INDEX IF NOT EXISTS idx_idempotency_expires ON idempotency_keys(expires_at);

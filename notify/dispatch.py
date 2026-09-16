@@ -89,6 +89,10 @@ def _get_whatsapp_driver(notif: Notification, *, feature: str | None = None):
     preferido, o fallback e o token da instância na Evolution GO. `feature`
     reordena a cadeia pelo mapa de capacidades (ex.: voice_note → GO primeiro).
     """
+    if getattr(notif, "caller", "") == "users.auth.otp" or bool((getattr(notif, "extra", None) or {}).get("is_otp")):
+        from whatsapp.factory import get_otp_whatsapp_driver
+        return get_otp_whatsapp_driver(notif)
+
     from channels.models import WhatsAppNumber
     from whatsapp.factory import get_driver
 
@@ -244,14 +248,20 @@ def dispatch(notification_id: int, sync: bool = False) -> None:
         except Exception as exc:  # noqa: BLE001
             logger.warning("notify.transcribe_failed_failopen", error=str(exc)[:160])
 
+    is_otp = bool(
+        getattr(notif, "caller", "") == "users.auth.otp"
+        or (getattr(notif, "extra", None) or {}).get("is_otp")
+    )
+
     # ── FASE 1.5: IA adapta o conteúdo por canal (fail-open) ────────────────
     # Fora da transação e ANTES dos senders. Falha de IA nunca segura envio:
     # adapt() devolve o original quando o OmniRouter não ajudar. Os textos
     # adaptados viajam em atributos efêmeros (_wa_text/_email_text) — o
     # notif.text persistido continua sendo o que o app mandou.
+    # OTP transacional NUNCA passa por IA: teor verbatim e latência mínima.
     from ai import adapt as ai_adapt
 
-    if (do_whatsapp or do_email) and ai_adapt.enabled_for(notif.account):
+    if (do_whatsapp or do_email) and not is_otp and ai_adapt.enabled_for(notif.account):
         text_to_adapt = getattr(notif, "_email_text", "") or notif.text
         canais = [c for c, on in (("whatsapp", do_whatsapp), ("email", do_email)) if on]
         adapted = ai_adapt.adapt(text_to_adapt, channels=canais, title=notif.title or "")
@@ -270,6 +280,7 @@ def dispatch(notification_id: int, sync: bool = False) -> None:
     # Conta que passou do teto por minuto tem o canal devolvido pra fila (o
     # retry transitório reagenda) — protege o número de banimento e a
     # reputação do IP de e-mail. Jitter entre envios de WhatsApp idem.
+    # OTP transacional (users.auth.otp) tem canal prioritário e ignora teto de marketing.
     def _cadence_exceeded(channel: str, limit: int) -> bool:
         if not limit:
             return False
@@ -287,7 +298,7 @@ def dispatch(notification_id: int, sync: bool = False) -> None:
         )
         return enviados >= limit
 
-    if do_whatsapp and _cadence_exceeded(
+    if do_whatsapp and not is_otp and _cadence_exceeded(
         "whatsapp", int(getattr(settings, "WA_RATE_PER_MIN_ACCOUNT", 0))
     ):
         notif.whatsapp_status = STATUS_FAILED
@@ -295,7 +306,7 @@ def dispatch(notification_id: int, sync: bool = False) -> None:
         notif._transient_wa = not sync
         do_whatsapp = False
         logger.info("notify.cadence_hold", external_id=str(notif.external_id), channel="whatsapp")
-    if do_email and _cadence_exceeded(
+    if do_email and not is_otp and _cadence_exceeded(
         "email", int(getattr(settings, "MAIL_RATE_PER_MIN_ACCOUNT", 0))
     ):
         notif.email_status = STATUS_FAILED
@@ -312,9 +323,9 @@ def dispatch(notification_id: int, sync: bool = False) -> None:
     def _job_whatsapp() -> None:
         try:
             # Jitter anti-bloqueio (K3): espaça envios consecutivos do mesmo
-            # número. Só no caminho assíncrono — teste do painel não espera.
+            # número. Só no caminho assíncrono e não-OTP.
             jitter = float(getattr(settings, "WA_JITTER_MAX_S", 0))
-            if jitter and not sync:
+            if jitter and not sync and not is_otp:
                 import random
                 import time as _time
 
@@ -444,8 +455,8 @@ def _record_provider(notif: Notification, driver, result) -> None:
     """
     from whatsapp.ids import extract_message_id
 
-    notif.driver_used = getattr(driver, "name", "") or notif.driver_used
-    notif.driver_reason = getattr(driver, "last_reason", "") or ""
+    notif.driver_used = (getattr(driver, "name", "") or notif.driver_used)[:20]
+    notif.driver_reason = (getattr(driver, "last_reason", "") or "")[:200]
     msg_id = extract_message_id(result)
     if msg_id:
         notif.provider_message_id = msg_id

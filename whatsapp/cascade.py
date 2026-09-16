@@ -41,11 +41,17 @@ def _retry_backoff_s() -> float:
 class CascadeDriver(WhatsAppDriver):
     """Encadeia drivers; usa o primeiro cuja sessão responder."""
 
-    def __init__(self, builders: list[tuple[str, Callable[[], WhatsAppDriver]]]) -> None:
+    def __init__(
+        self,
+        builders: list[tuple[str, Callable[[], WhatsAppDriver]]],
+        *,
+        immediate_fallback: bool = False,
+    ) -> None:
         if not builders:
             raise ValueError("CascadeDriver exige ao menos um driver.")
         self._builders = builders
         self._open: dict[str, WhatsAppDriver] = {}
+        self.immediate_fallback = immediate_fallback
         # Quem respondeu por último. É o que o dispatch grava como driver_used —
         # saber que caiu no fallback é metade do diagnóstico de um incidente.
         self.name = builders[0][0]
@@ -61,12 +67,13 @@ class CascadeDriver(WhatsAppDriver):
         return self._open[name]
 
     async def aclose(self) -> None:
-        for driver in self._open.values():
+        drivers = list(self._open.values())
+        self._open.clear()
+        for driver in drivers:
             try:
                 await driver.aclose()
             except Exception:  # noqa: BLE001 — fechar não pode derrubar o envio
                 logger.warning("whatsapp.cascade.close_failed")
-        self._open.clear()
 
     # ---------- núcleo ----------
 
@@ -75,8 +82,8 @@ class CascadeDriver(WhatsAppDriver):
 
         last_down: WhatsAppSessionDown | None = None
         quedas: list[str] = []
-        attempts = _retry_attempts()
-        backoff = _retry_backoff_s()
+        attempts = 1 if self.immediate_fallback else _retry_attempts()
+        backoff = 0.0 if self.immediate_fallback else _retry_backoff_s()
 
         for index, (name, build) in enumerate(self._builders):
             # I5: circuito aberto = provedor comprovadamente morto — não gasta

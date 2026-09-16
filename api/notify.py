@@ -137,6 +137,8 @@ class NotifyOptions(Schema):
     mail_template: str = Field(default="default", max_length=50)
     caller: str = Field(default="notify", max_length=100)
     run_sync: bool = Field(default=False, description="Despachar imediatamente de forma síncrona")
+    is_otp: bool = Field(default=False, description="Flag de OTP transacional para prioridade máxima")
+    extra: dict | None = Field(default=None, description="Metadados adicionais livres")
 
 
 class NotifyIn(Schema):
@@ -221,8 +223,13 @@ def notify(request, payload: NotifyIn):
 
 
 def _command_extra(options: NotifyOptions) -> dict | None:
+    base_extra: dict = dict(options.extra or {})
+    if options.is_otp:
+        base_extra["is_otp"] = True
+
+    cmd_extra: dict = {}
     if options.poll:
-        return {
+        cmd_extra = {
             "poll": {
                 "question": options.poll.question,
                 "options": options.poll.options,
@@ -243,9 +250,9 @@ def _command_extra(options: NotifyOptions) -> dict | None:
             data["currency"] = options.pix.currency.strip() if options.pix.currency else "BRL"
         elif options.pix.currency and options.pix.currency != "BRL":
             data["currency"] = options.pix.currency.strip()
-        return {"pix": data}
-    if options.location:
-        return {
+        cmd_extra = {"pix": data}
+    elif options.location:
+        cmd_extra = {
             "location": {
                 "latitude": options.location.latitude,
                 "longitude": options.location.longitude,
@@ -253,15 +260,15 @@ def _command_extra(options: NotifyOptions) -> dict | None:
                 "address": (options.location.address or "").strip(),
             }
         }
-    if options.contact:
-        return {
+    elif options.contact:
+        cmd_extra = {
             "contact": {
                 "full_name": options.contact.full_name.strip(),
                 "phone": options.contact.phone.strip(),
                 "organization": (options.contact.organization or "").strip(),
             }
         }
-    if options.carousel:
+    elif options.carousel:
         cards_data = []
         for card in options.carousel.cards:
             buttons_data = []
@@ -284,21 +291,23 @@ def _command_extra(options: NotifyOptions) -> dict | None:
                     "buttons": buttons_data or None,
                 }
             )
-        return {
+        cmd_extra = {
             "carousel": {
                 "cards": cards_data,
                 "body": (options.carousel.body or "").strip(),
                 "footer": (options.carousel.footer or "").strip(),
             }
         }
-    if options.qr_code:
+    elif options.qr_code:
         data = options.qr_code.data.strip()
         if not data:
             raise HttpError(400, "options.qr_code.data é obrigatório.")
-        return {
+        cmd_extra = {
             "qr_code": {
                 "data": data,
                 "caption": (options.qr_code.caption or "").strip(),
             }
         }
-    return None
+
+    merged = {**base_extra, **cmd_extra}
+    return merged or None
