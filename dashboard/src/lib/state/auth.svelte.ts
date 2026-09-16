@@ -1,8 +1,12 @@
+const isLocalhost = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+const defaultEdgeUrl = isLocalhost ? 'http://localhost:8787' : 'https://notify-edge.supletivo.net.br';
+const defaultBackendUrl = isLocalhost ? 'http://localhost:8000' : 'https://notify.supletivo.net.br';
+
 export class AuthStore {
   apiKey = $state(typeof window !== 'undefined' ? localStorage.getItem('ntf_api_key') || '' : '');
   accountSlug = $state(typeof window !== 'undefined' ? localStorage.getItem('ntf_account_slug') || 'default' : 'default');
-  edgeUrl = $state(typeof window !== 'undefined' ? localStorage.getItem('ntf_edge_url') || 'https://notify-edge.supletivo.net.br' : 'https://notify-edge.supletivo.net.br');
-  backendUrl = $state(typeof window !== 'undefined' ? localStorage.getItem('ntf_backend_url') || 'https://notify.supletivo.net.br' : 'https://notify.supletivo.net.br');
+  edgeUrl = $state(typeof window !== 'undefined' ? localStorage.getItem('ntf_edge_url') || defaultEdgeUrl : defaultEdgeUrl);
+  backendUrl = $state(typeof window !== 'undefined' ? localStorage.getItem('ntf_backend_url') || defaultBackendUrl : defaultBackendUrl);
 
   isAuthenticated = $derived(Boolean(this.apiKey.trim()));
 

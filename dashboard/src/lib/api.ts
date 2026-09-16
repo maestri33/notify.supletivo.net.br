@@ -80,19 +80,38 @@ export class ApiClient {
       });
       if (res.ok) {
         const d = await res.json();
+        const h24 = d['24h'] || {};
+        const total = h24.total ?? d.total_24h ?? 0;
+        const taxaErro = h24.taxa_erro ?? 0;
+        const successRate = total > 0 ? (1 - taxaErro) * 100 : 100.0;
+
+        let waCount = 0;
+        if (h24.whatsapp && typeof h24.whatsapp === 'object') {
+          waCount = Number(Object.values(h24.whatsapp).reduce((a: number, b: any) => a + Number(b), 0));
+        }
+        let emCount = 0;
+        if (h24.email && typeof h24.email === 'object') {
+          emCount = Number(Object.values(h24.email).reduce((a: number, b: any) => a + Number(b), 0));
+        }
+
+        const waFailed = h24.whatsapp?.failed || 0;
+        const emFailed = h24.email?.failed || 0;
+        const failedTotal = waFailed + emFailed;
+        const deliveredTotal = Math.max(0, total - failedTotal);
+
         return {
-          total_volume_24h: d.total_24h || 0,
-          delivered_count_24h: d.delivered_24h || 0,
-          failed_count_24h: d.failed_24h || 0,
-          success_rate_percent: d.success_rate || 99.4,
-          whatsapp_volume_24h: d.channels?.whatsapp || 0,
-          email_volume_24h: d.channels?.email || 0,
-          queue_backlog: d.queue_backlog || 0,
-          last_updated: new Date().toISOString(),
+          total_volume_24h: total,
+          delivered_count_24h: deliveredTotal,
+          failed_count_24h: failedTotal,
+          success_rate_percent: successRate,
+          whatsapp_volume_24h: waCount || d.channels?.whatsapp || 0,
+          email_volume_24h: emCount || d.channels?.email || 0,
+          queue_backlog: d.fila ?? d.queue_backlog ?? 0,
+          last_updated: d.at || new Date().toISOString(),
         };
       }
-    } catch {
-      // Ignore
+    } catch (err) {
+      console.warn('Real metrics fetch error:', err);
     }
 
     // Default snapshot for offline or initial load
@@ -117,9 +136,8 @@ export class ApiClient {
   ): Promise<NotificationRecord[]> {
     try {
       const query = new URLSearchParams();
-      if (filters.channel && filters.channel !== 'all') query.set('channel', filters.channel);
-      if (filters.status && filters.status !== 'all') query.set('status', filters.status);
-      if (filters.search) query.set('q', filters.search);
+      if (accountSlug && accountSlug !== 'default') query.set('account_id', accountSlug);
+      if (filters.search) query.set('caller', filters.search);
 
       const res = await fetch(`${backendUrl.replace(/\/$/, '')}/v1/notifications?${query.toString()}`, {
         headers: this.getHeaders(apiKey, accountSlug),
@@ -128,10 +146,31 @@ export class ApiClient {
 
       if (res.ok) {
         const data = await res.json();
-        return data.items || [];
+        const items = Array.isArray(data) ? data : data.items || [];
+        if (items.length > 0) {
+          return items.map((item: any) => ({
+            id: String(item.external_id || item.id),
+            account_slug: accountSlug || 'default',
+            channel: (item.want_whatsapp || item.recipient_phone) ? 'whatsapp' : 'email',
+            recipient: item.recipient_phone || item.recipient_email || '—',
+            subject: item.subject || item.title || item.text?.slice(0, 40) || 'Sem assunto',
+            status: (item.whatsapp_status === 'sent' || item.email_status === 'sent')
+              ? 'sent'
+              : (item.whatsapp_status === 'failed' || item.email_status === 'failed')
+              ? 'failed'
+              : (item.whatsapp_status === 'pending' || item.email_status === 'pending')
+              ? 'queued'
+              : 'dispatched',
+            idempotency_key: item.idempotency_key,
+            payload_json: JSON.stringify(item, null, 2),
+            error_message: item.whatsapp_error || item.email_error,
+            created_at: String(item.created_at || new Date().toISOString()),
+            driver_used: item.caller || 'Standard',
+          }));
+        }
       }
-    } catch {
-      // Ignore
+    } catch (err) {
+      console.warn('Real notifications fetch error:', err);
     }
 
     // Retorna histórico padrão demonstrativo representativo de produção
