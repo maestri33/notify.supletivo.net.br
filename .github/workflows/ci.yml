@@ -63,6 +63,12 @@ jobs:
         run: |
           npx tsc --noEmit
 
+      - name: Run Edge Vitest Test Suite
+        working-directory: edge
+        run: |
+          npm test
+
+
   version-oracle-bump:
     name: Platform Version Oracle Bump
     needs: [backend-test, edge-check]

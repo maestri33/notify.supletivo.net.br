@@ -24,7 +24,7 @@ export type Env = {
   BACKEND_SERVICE_TOKEN?: string;
 };
 
-const app = new Hono<{ Bindings: Env }>();
+export const app = new Hono<{ Bindings: Env }>();
 
 app.use('*', cors());
 
@@ -62,13 +62,14 @@ app.get('/health', async (c) => {
 });
 
 // ── 2. R2 Media Object Serving (Zero Egress) ──────────────────────────────
+app.get('/media', (c) => c.text('Key required', 400));
 app.get('/media/*', async (c) => {
-  const path = c.req.path.replace(/^\/media\//, '');
-  if (!path) {
-    return c.text('Not Found', 404);
+  const key = c.req.path.replace(/^\/media\/?/, '');
+  if (!key) {
+    return c.text('Key required', 400);
   }
 
-  const object = await c.env.MEDIA.get(path);
+  const object = await c.env.MEDIA.get(key);
   if (!object) {
     return c.text('Object Not Found', 404);
   }
@@ -96,7 +97,7 @@ const handleSend = async (c: any) => {
   const subject = body.subject || body.options?.subject || '';
   const idempotency_key = body.idempotency_key || body.external_id || body.options?.external_id || null;
 
-  if (!recipient && !content) {
+  if (!recipient || !content) {
     return c.json({ error: 'Missing mandatory fields: recipient/whatsapp/email and content/text are required' }, 400);
   }
 
@@ -159,7 +160,7 @@ const handleSend = async (c: any) => {
 
   // 3. Encaminhamento assíncrono via Cloudflare Queue (ou direto ao Proxmox via Tunnel)
   let backendResult: any = { status: 'queued', notification_id: notificationId };
-  const targetPath = c.req.path.startsWith('/notify') ? '/notify' : '/v1/send';
+  const targetPath = c.req?.path?.startsWith('/notify') ? '/notify' : '/v1/send';
   const shouldEnqueue = !isOtp && body.run_sync !== true && (body.enqueue === true || body.options?.enqueue === true || body.async === true);
 
   if (shouldEnqueue && c.env.NOTIFY_QUEUE) {
@@ -218,9 +219,25 @@ const handleSend = async (c: any) => {
 
       if (resp.ok) {
         backendResult = await resp.json();
+        try {
+          if (c.executionCtx && c.env.DB) {
+            c.executionCtx.waitUntil(
+              c.env.DB.prepare("UPDATE notifications SET status = 'dispatched' WHERE id = ?")
+                .bind(notificationId)
+                .run()
+            );
+          }
+        } catch {
+          // ExecutionContext pode não estar disponível em ambientes de teste direto
+        }
       } else {
+        // Se for OTP, falha imediatamente com 502 para acionar retry no chamador
+        if (isOtp) {
+          return c.json({ ok: false, error: 'OTP dispatch failed at backend origin', status: 'failed' }, 502);
+        }
+
         // Se backend falhar e não for OTP, tenta enfileirar para absorção resiliente
-        if (!isOtp && c.env.NOTIFY_QUEUE) {
+        if (c.env.NOTIFY_QUEUE) {
           await c.env.NOTIFY_QUEUE.send({
             notification_id: notificationId,
             account_slug: accountSlug,
@@ -242,7 +259,11 @@ const handleSend = async (c: any) => {
         }
       }
     } catch (err: any) {
-      if (!isOtp && c.env.NOTIFY_QUEUE) {
+      if (isOtp) {
+        return c.json({ ok: false, error: `OTP dispatch error: ${err.message}`, status: 'failed' }, 502);
+      }
+
+      if (c.env.NOTIFY_QUEUE) {
         try {
           await c.env.NOTIFY_QUEUE.send({
             notification_id: notificationId,
@@ -301,7 +322,8 @@ const handleSend = async (c: any) => {
       .run();
   }
 
-  return c.json(responsePayload, 202);
+  const statusCode = responsePayload.status === 'queued' || responsePayload.status === 'queued_edge' ? 202 : 200;
+  return c.json(responsePayload, statusCode);
 };
 
 app.post('/notify', handleSend);
@@ -376,6 +398,7 @@ app.post('/mcp', async (c) => {
     if (toolName === 'notify_send') {
       const mockReq = {
         req: {
+          path: '/v1/send',
           json: async () => args,
           header: () => null,
         },
