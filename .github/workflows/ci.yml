@@ -69,9 +69,38 @@ jobs:
           npm test
 
 
+  dashboard-check:
+    name: Svelte 5 Dashboard Check & Build (Cloudflare Pages)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: 'dashboard/package-lock.json'
+
+      - name: Install Dashboard Dependencies
+        working-directory: dashboard
+        run: |
+          npm ci
+
+      - name: Svelte Check (Runes & Types)
+        working-directory: dashboard
+        run: |
+          npm run check
+
+      - name: Build Production SPA
+        working-directory: dashboard
+        run: |
+          npm run build
+
   version-oracle-bump:
     name: Platform Version Oracle Bump
-    needs: [backend-test, edge-check]
+    needs: [backend-test, edge-check, dashboard-check]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:

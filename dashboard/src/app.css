@@ -1,0 +1,119 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --green: #00734d;
+  --green-deep: #005238;
+  --blue: #002776;
+  --blue-deep: #001a52;
+  --yellow: #ffc400;
+  --yellow-soft: #ffd75e;
+  --ink: #0b1220;
+  --ink-soft: #121d33;
+  --paper: #ffffff;
+  --paper-soft: #f5f7f3;
+  --line-light: rgba(255, 255, 255, 0.08);
+  --danger: #b91c1c;
+  --success: #15803d;
+  --warning: #92400e;
+  --info: #0369a1;
+
+  --shadow-zero-g: 0 20px 40px -15px rgba(0, 0, 0, 0.5), 0 10px 20px -8px rgba(0, 0, 0, 0.3);
+  --input-height: 48px;
+  --input-radius: 12px;
+}
+
+@layer utilities {
+  .font-display {
+    font-family: 'Archivo Black', system-ui, sans-serif;
+  }
+  .font-body {
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+  .glass-panel {
+    background: rgba(18, 29, 51, 0.75);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+  .glass-panel-hover {
+    transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .glass-panel-hover:hover {
+    background: rgba(24, 39, 68, 0.85);
+    border-color: rgba(255, 196, 0, 0.3);
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-zero-g);
+  }
+}
+
+/* Botão Pátria Amada Refinada com animação btn-shine */
+.btn-primary {
+  height: var(--input-height);
+  background-color: var(--yellow);
+  color: var(--ink);
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 0 1.5rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  position: relative;
+  overflow: hidden;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background-color: var(--yellow-soft);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(255, 196, 0, 0.35);
+}
+
+.btn-primary:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.btn-primary::after {
+  content: '';
+  position: absolute;
+  top: -50%;
+  left: -60%;
+  width: 40%;
+  height: 200%;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.4) 50%,
+    transparent 100%
+  );
+  transform: rotate(25deg);
+  animation: btn-shine 6.5s infinite;
+}
+
+@keyframes btn-shine {
+  0%, 80% {
+    left: -60%;
+  }
+  100% {
+    left: 140%;
+  }
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #0b1220;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 196, 0, 0.4);
+}

@@ -525,7 +525,10 @@ export const queueHandler = async (
   );
 };
 
+import { handleIncomingEmail } from './email-handler';
+
 export default {
   fetch: app.fetch,
   queue: queueHandler,
+  email: handleIncomingEmail,
 };
