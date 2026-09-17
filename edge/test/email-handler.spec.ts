@@ -61,4 +61,70 @@ describe('Cloudflare Agentic Inbox Email Handler', () => {
     expect(result.intent).toBe('outro');
     expect(result.confidence).toBe(0.5);
   });
+
+  it('deve processar mensagem recebida e gerar alerta prioritário para documentos', async () => {
+    const { handleIncomingEmail } = await import('../src/email-handler');
+
+    const mockAi = {
+      run: vi.fn().mockResolvedValue({
+        response: JSON.stringify({
+          intent: 'envio_documentos',
+          confidence: 0.99,
+          summary: 'Envio de RG e comprovante de residência',
+          extracted_entities: {
+            cpf: '123.456.789-00',
+            phone: '11999998888',
+            student_name: 'Maria Souza',
+          },
+          suggested_reply: 'Recebemos seus documentos!',
+        }),
+      }),
+    };
+
+    const mockQueue = {
+      send: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const mockDb = {
+      prepare: vi.fn().mockReturnValue({
+        bind: vi.fn().mockReturnThis(),
+        first: vi.fn().mockResolvedValue(null),
+        run: vi.fn().mockResolvedValue({ success: true }),
+      }),
+    };
+
+    const emailRaw = 'From: maria@email.com\r\nTo: matriculas@supletivo.net.br\r\nSubject: Meus documentos do supletivo\r\n\r\nSegue meu RG e comprovante.';
+    const rawBytes = new TextEncoder().encode(emailRaw);
+
+    const mockMessage: any = {
+      from: 'maria@email.com',
+      to: 'matriculas@supletivo.net.br',
+      headers: new Map([['subject', 'Meus documentos do supletivo']]),
+      raw: new ReadableStream({
+        start(controller) {
+          controller.enqueue(rawBytes);
+          controller.close();
+        },
+      }),
+    };
+
+    const mockEnv: any = {
+      AI: mockAi,
+      DB: mockDb,
+      NOTIFY_QUEUE: mockQueue,
+    };
+
+    const mockCtx: any = {
+      waitUntil: vi.fn(),
+    };
+
+    await handleIncomingEmail(mockMessage, mockEnv, mockCtx);
+
+    expect(mockQueue.send).toHaveBeenCalledTimes(1);
+    const queuedPayload = mockQueue.send.mock.calls[0][0];
+    expect(queuedPayload.channel).toBe('email_inbound');
+    expect(queuedPayload.payload.priority).toBe('high');
+    expect(queuedPayload.payload.whatsapp_alert).toBeDefined();
+    expect(queuedPayload.payload.whatsapp_alert.text).toContain('Novo Email Prioritário Recebido');
+  });
 });

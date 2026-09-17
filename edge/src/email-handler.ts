@@ -234,6 +234,7 @@ export async function handleIncomingEmail(
   // 7. Enfileirar evento para o Backend / WhatsApp Notifier (caso configurado)
   if (env.NOTIFY_QUEUE) {
     try {
+      const isHighPriority = analysis.intent === 'envio_documentos' || analysis.intent === 'comprovante_pagamento';
       await env.NOTIFY_QUEUE.send({
         notification_id: emailId,
         account_slug: accountSlug,
@@ -244,9 +245,13 @@ export async function handleIncomingEmail(
           from_address: fromAddress,
           from_name: fromName,
           intent: analysis.intent,
+          priority: isHighPriority ? 'high' : 'normal',
           summary: analysis.summary,
           extracted_entities: analysis.extracted_entities,
           attachments: attachmentsMeta,
+          whatsapp_alert: isHighPriority ? {
+            text: `🚨 *Novo Email Prioritário Recebido*\n*De:* ${fromName || fromAddress}\n*Intenção:* ${analysis.intent}\n*Resumo:* ${analysis.summary}\n*CPF:* ${analysis.extracted_entities.cpf || 'Não informado'}`,
+          } : undefined,
         },
         timestamp: new Date().toISOString(),
       });
