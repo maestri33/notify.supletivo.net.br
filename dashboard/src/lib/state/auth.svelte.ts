@@ -1,6 +1,6 @@
 const isLocalhost = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
-const defaultEdgeUrl = isLocalhost ? 'http://localhost:8787' : 'https://notify-edge.supletivo.net.br';
-const defaultBackendUrl = isLocalhost ? 'http://localhost:8000' : 'https://notify.supletivo.net.br';
+const defaultEdgeUrl = isLocalhost ? 'http://localhost:8787' : 'https://notify-edge.v7maestri.workers.dev';
+const defaultBackendUrl = isLocalhost ? 'http://localhost:8000' : 'https://notify-backend.supletivo.net.br';
 
 export class AuthStore {
   apiKey = $state(typeof window !== 'undefined' ? localStorage.getItem('ntf_api_key') || '' : '');

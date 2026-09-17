@@ -18,6 +18,16 @@ DEBUG = env.bool("DEBUG", default=False)
 ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=["*"])
 APP_VERSION = env("APP_VERSION", default="0.1.0-alpha.1")
 
+# ── Security & Production Hardening ─────────────────────────────────────────
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+USE_X_FORWARDED_HOST = True
+USE_X_FORWARDED_PORT = True
+
+if not DEBUG:
+    SESSION_COOKIE_SECURE = env.bool("SESSION_COOKIE_SECURE", default=True)
+    CSRF_COOKIE_SECURE = env.bool("CSRF_COOKIE_SECURE", default=True)
+    SECURE_SSL_REDIRECT = env.bool("SECURE_SSL_REDIRECT", default=False)
+
 # ── Apps ────────────────────────────────────────────────────────────────────
 INSTALLED_APPS = [
     "django.contrib.admin",

@@ -10,25 +10,25 @@ BACKEND_ORIGIN = "https://notify-backend.supletivo.net.br"
 [[d1_databases]]
 binding = "DB"
 database_name = "notify-db"
-database_id = "635cce70-7b14-4974-a2d9-9bac7ca7aca4"
+database_id = "9f60bd23-8df1-4311-ad1f-7fc296bb0a49"
 
-[[r2_buckets]]
-binding = "MEDIA"
-bucket_name = "notify-media"
+# [[r2_buckets]]
+# binding = "MEDIA"
+# bucket_name = "notify-media"
 
 [ai]
 binding = "AI"
 
-# ── Cloudflare Queues (Async Edge Ingestion Buffer) ─────────
-[[queues.producers]]
-binding = "NOTIFY_QUEUE"
-queue = "notify-events"
-
-[[queues.consumers]]
-queue = "notify-events"
-max_batch_size = 10
-max_retries = 3
-dead_letter_queue = "notify-events-dlq"
+# ── Cloudflare Queues (Requer Workers Paid) ───────────────────
+# [[queues.producers]]
+# binding = "NOTIFY_QUEUE"
+# queue = "notify-events"
+# 
+# [[queues.consumers]]
+# queue = "notify-events"
+# max_batch_size = 10
+# max_retries = 3
+# dead_letter_queue = "notify-events-dlq"
 
 # ── Cloudflare Email Sending ────────────────────────────────
 [[send_email]]
