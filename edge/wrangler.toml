@@ -3,6 +3,10 @@ main = "src/index.ts"
 compatibility_date = "2024-09-23"
 compatibility_flags = ["nodejs_compat"]
 
+routes = [
+  { pattern = "notify.supletivo.net.br", custom_domain = true }
+]
+
 [vars]
 ENVIRONMENT = "production"
 BACKEND_ORIGIN = "https://notify-backend.supletivo.net.br"
