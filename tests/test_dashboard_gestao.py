@@ -105,7 +105,10 @@ def test_status_lista_os_quatro_servicos(client, monkeypatch):
 
 # ── F5: teste de análise IA (fail-open) ─────────────────────────────────────
 
-def test_adapt_test_fail_open_sem_gateway(client, account):
+def test_adapt_test_fail_open_sem_gateway(client, account, monkeypatch):
+    from ai import adapt as adapt_mod
+
+    monkeypatch.setattr(adapt_mod, "complete", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("Gateway offline")))
     resp = client.post(
         f"/dashboard/app/{account.slug}/ai/adapt-test", data={"text": "olá {nome}"}
     )
