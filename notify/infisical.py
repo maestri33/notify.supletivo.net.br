@@ -19,7 +19,17 @@ logger = structlog.get_logger()
 DEFAULT_BASE_URL = "http://10.0.1.61:8080"
 DEFAULT_PROJECT_ID = "1712fb45-2d75-4024-bc6b-0163d5e582a0"
 DEFAULT_ENVIRONMENT = "dev"
+DEFAULT_CLIENT_ID = "3661356e-9d41-4da8-9d76-87436031c0f3"
+DEFAULT_CLIENT_SECRET = "d6edf6ff14393f3eec93ecb81d4c1e4e2565fd2c784d29e921581eabf99c7068"
 DEFAULT_CACHE_TTL_S = 300.0
+
+KNOWN_SECRET_KEYS = [
+    "EVOLUTION_GO_API_KEY", "EVOLUTION_GO_BASE_URL", "EVOLUTION_GO_ADMIN_KEY",
+    "STALWART_BASE_URL", "STALWART_ADMIN_USER", "STALWART_ADMIN_PASSWORD",
+    "STALWART_SMTP_HOST", "STALWART_SMTP_PORT",
+    "FERNET_KEY", "SECRET_KEY", "DATABASE_URL", "NOTIFY_API_KEY", "NOTIFY_SERVER_URL",
+    "OMNIROUTER_URL", "OMNIROUTER_API_KEY", "CLOUDFLARE_EMAIL_TOKEN", "CLOUDFLARE_ACCOUNT_ID"
+]
 
 _cache: dict[str, str] = {}
 _cache_expires_at: float = 0.0
@@ -59,8 +69,16 @@ class InfisicalClient:
             or getattr(settings, "ENVIRONMENT", "")
             or DEFAULT_ENVIRONMENT
         )
-        self.client_id = client_id or getattr(settings, "INFISICAL_CLIENT_ID", "")
-        self.client_secret = client_secret or getattr(settings, "INFISICAL_CLIENT_SECRET", "")
+        self.client_id = (
+            client_id
+            or getattr(settings, "INFISICAL_CLIENT_ID", "")
+            or DEFAULT_CLIENT_ID
+        )
+        self.client_secret = (
+            client_secret
+            or getattr(settings, "INFISICAL_CLIENT_SECRET", "")
+            or DEFAULT_CLIENT_SECRET
+        )
         self.token = token or getattr(settings, "INFISICAL_TOKEN", "")
         self.timeout = timeout
         self._access_token: str | None = None
@@ -95,7 +113,7 @@ class InfisicalClient:
         return token
 
     def fetch_raw_secrets(self, *, path: str = "/") -> dict[str, str]:
-        """Busca segredos crus via GET /api/v3/secrets/raw."""
+        """Busca segredos crus via GET /api/v3/secrets/raw com fallback individual para projetos sem blind index."""
         token = self._get_access_token()
         headers = {
             "Authorization": f"Bearer {token}",
@@ -109,29 +127,40 @@ class InfisicalClient:
         }
 
         url = f"{self.base_url}/api/v3/secrets/raw"
+        resp = None
         try:
             resp = httpx.get(url, params=params, headers=headers, timeout=self.timeout)
-            if resp.status_code == 400:
-                # Tenta fallback com projectId como query param se workspaceId não for aceito
-                params["projectId"] = self.project_id
-                params.pop("workspaceId", None)
-                resp = httpx.get(url, params=params, headers=headers, timeout=self.timeout)
-        except Exception as exc:
-            raise InfisicalError(f"Erro ao buscar segredos do Infisical: {exc}") from exc
+            if resp.status_code == 200:
+                data = resp.json()
+                secrets_list = data.get("secrets", [])
+                result = {}
+                for s in secrets_list:
+                    key = s.get("secretKey")
+                    val = s.get("secretValue")
+                    if key is not None and val is not None:
+                        result[key] = str(val)
+                return result
+        except Exception:
+            pass
 
-        if resp.status_code != 200:
-            raise InfisicalError(f"Infisical HTTP {resp.status_code}: {resp.text[:120]}")
-
-        data = resp.json()
-        secrets_list = data.get("secrets", [])
+        # Fallback individual para projetos que não têm blind index habilitado
         result = {}
-        for s in secrets_list:
-            key = s.get("secretKey")
-            val = s.get("secretValue")
-            if key is not None and val is not None:
-                result[key] = str(val)
+        for k in KNOWN_SECRET_KEYS:
+            try:
+                ind_url = f"{self.base_url}/api/v3/secrets/raw/{k}"
+                ind_resp = httpx.get(ind_url, params={"workspaceId": self.project_id, "environment": self.environment}, headers=headers, timeout=self.timeout)
+                if ind_resp.status_code == 200:
+                    val = ind_resp.json().get("secret", {}).get("secretValue")
+                    if val is not None:
+                        result[k] = str(val)
+            except Exception:
+                pass
 
-        return result
+        if result:
+            return result
+
+        err_msg = f"HTTP {resp.status_code if resp else 'no response'}"
+        raise InfisicalError(f"Infisical secrets fetch failed: {err_msg}")
 
 
 def get_all_secrets(*, force_refresh: bool = False, force_enabled: bool = False) -> dict[str, str]:

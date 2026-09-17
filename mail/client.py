@@ -101,7 +101,7 @@ class MailClient:
                     plain_body=None,
                 )
             except Exception as jmap_exc:
-                logger.warning("mail.jmap_fallback_failed", error=str(jmap_exc))
+                logger.warning("mail.jmap_fallback_failed", error=repr(jmap_exc))
                 raise MailError(f"SMTP e JMAP falharam: {type(exc).__name__}: {exc}") from exc
 
     def _send_via_jmap(self, to_email: str, subject: str, html_body: str, plain_body: str | None) -> dict:
@@ -113,7 +113,7 @@ class MailClient:
         base_url = (getattr(settings, "STALWART_BASE_URL", "") or "http://10.0.1.20:8080").rstrip("/")
         user = getattr(settings, "STALWART_ADMIN_USER", "") or "ceo@v7m.org"
         password = getattr(settings, "STALWART_ADMIN_PASSWORD", "") or "Vvm1993!))#"
-        b64 = base64.b64encode(f"{user}:{password}".encode()).decode("ascii")
+        b64 = base64.b64encode(f"{user}:{password}".encode("utf-8")).decode("ascii")
         url = f"{base_url}/jmap/"
         from_email = self._from_email or user
         from_name = self._from_name or "Notify Supletivo"
@@ -162,16 +162,17 @@ class MailClient:
         }
         req = urllib.request.Request(
             url,
-            data=json.dumps(payload).encode(),
+            data=json.dumps(payload, ensure_ascii=True).encode("utf-8"),
             headers={"Authorization": f"Basic {b64}", "Content-Type": "application/json"},
         )
         with urllib.request.urlopen(req, timeout=self._timeout) as resp:
-            data = json.loads(resp.read().decode())
+            data = json.loads(resp.read().decode("utf-8"))
             resps = data.get("methodResponses", [])
             for r in resps:
                 if r[0] == "error":
                     raise MailError(f"JMAP falhou: {r[1]}")
-            logger.info("mail.jmap_sent_ok", to=to_email, subject=subject[:80])
+            safe_sub = subject.encode("ascii", errors="replace").decode("ascii")[:80]
+            logger.info("mail.jmap_sent_ok", to=to_email, subject=safe_sub)
             return {}
 
     async def verify_login(self) -> None:

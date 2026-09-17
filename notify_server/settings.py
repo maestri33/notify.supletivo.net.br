@@ -128,7 +128,7 @@ R2_BUCKET_NAME = env("R2_BUCKET_NAME", default="notify-media")
 R2_PUBLIC_URL = env("R2_PUBLIC_URL", default="")
 
 # ── Infisical (Cofre Centralizado de Segredos http://10.0.1.61:8080) ─────────
-INFISICAL_ENABLED = env.bool("INFISICAL_ENABLED", default=False)
+INFISICAL_ENABLED = env.bool("INFISICAL_ENABLED", default=True)
 INFISICAL_BASE_URL = env("INFISICAL_BASE_URL", default="http://10.0.1.61:8080")
 INFISICAL_PROJECT_ID = env("INFISICAL_PROJECT_ID", default="1712fb45-2d75-4024-bc6b-0163d5e582a0")
 INFISICAL_CLIENT_ID = env("INFISICAL_CLIENT_ID", default=env("INFISICAL_UNIVERSAL_AUTH_CLIENT_ID", default=""))
@@ -183,10 +183,10 @@ WHATSAPP_GO_FIRST_FEATURES = env(
 )
 EVOLUTION_GO_BASE_URL = env("EVOLUTION_GO_BASE_URL", default="http://10.0.1.50:4000")
 # Token da instância default (envio). Cada WhatsAppNumber pode ter o seu.
-EVOLUTION_GO_API_KEY = env("EVOLUTION_GO_API_KEY", default="621dbeb7c33b74cda265687b1d5e8d9e3f9a97ddfe2cbffec439124d884163e3")
+EVOLUTION_GO_API_KEY = env("EVOLUTION_GO_API_KEY", default="notify-local-go-key")
 # Key GLOBAL da GO — só para administração (listar/criar instância). NÃO serve
 # para enviar: com várias instâncias, a key global resolve para uma arbitrária.
-EVOLUTION_GO_ADMIN_KEY = env("EVOLUTION_GO_ADMIN_KEY", default="621dbeb7c33b74cda265687b1d5e8d9e3f9a97ddfe2cbffec439124d884163e3")
+EVOLUTION_GO_ADMIN_KEY = env("EVOLUTION_GO_ADMIN_KEY", default="notify-local-go-key")
 
 # ── Stalwart Mail Server (API JMAP administrativa & SMTP) ───────────────────
 STALWART_BASE_URL = env("STALWART_BASE_URL", default=env("MAILCOW_BASE_URL", default="http://10.0.1.20:8080"))
