@@ -2,6 +2,7 @@ name = "notify-edge"
 main = "src/index.ts"
 compatibility_date = "2024-09-23"
 compatibility_flags = ["nodejs_compat"]
+workers_dev = true
 
 routes = [
   { pattern = "notify.supletivo.net.br", custom_domain = true }
