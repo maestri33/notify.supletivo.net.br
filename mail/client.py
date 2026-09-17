@@ -91,11 +91,88 @@ class MailClient:
             raise MailError(
                 f"destinatário recusado: {to_email}", recipients_refused=exc.recipients
             ) from exc
-        except smtplib.SMTPException as exc:
-            raise MailError(f"SMTP falhou: {type(exc).__name__}: {exc}") from exc
-        except OSError as exc:
-            raise MailError(f"conexão SMTP falhou: {type(exc).__name__}: {exc}") from exc
-        return {}
+        except (smtplib.SMTPException, OSError) as exc:
+            logger.info("mail.smtp_failed_trying_jmap", host=self._host, port=self._port, error=str(exc))
+            try:
+                return self._send_via_jmap(
+                    to_email=to_email,
+                    subject=str(msg.get("Subject", "")),
+                    html_body=msg.as_string(),
+                    plain_body=None,
+                )
+            except Exception as jmap_exc:
+                logger.warning("mail.jmap_fallback_failed", error=str(jmap_exc))
+                raise MailError(f"SMTP e JMAP falharam: {type(exc).__name__}: {exc}") from exc
+
+    def _send_via_jmap(self, to_email: str, subject: str, html_body: str, plain_body: str | None) -> dict:
+        import base64
+        import json
+        import urllib.request
+        from django.conf import settings
+
+        base_url = (getattr(settings, "STALWART_BASE_URL", "") or "http://10.0.1.20:8080").rstrip("/")
+        user = getattr(settings, "STALWART_ADMIN_USER", "") or "ceo@v7m.org"
+        password = getattr(settings, "STALWART_ADMIN_PASSWORD", "") or "Vvm1993!))#"
+        b64 = base64.b64encode(f"{user}:{password}".encode()).decode("ascii")
+        url = f"{base_url}/jmap/"
+        from_email = self._from_email or user
+        from_name = self._from_name or "Notify Supletivo"
+
+        payload = {
+            "using": ["urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail", "urn:ietf:params:jmap:submission"],
+            "methodCalls": [
+                [
+                    "Email/set",
+                    {
+                        "accountId": "i",
+                        "create": {
+                            "k1": {
+                                "mailboxIds": {"d": True},
+                                "from": [{"name": from_name, "email": from_email}],
+                                "to": [{"name": to_email, "email": to_email}],
+                                "subject": subject,
+                                "bodyValues": {
+                                    "body": {"value": plain_body or html_body}
+                                },
+                                "textBody": [{"partId": "body", "type": "text/plain"}],
+                            }
+                        },
+                    },
+                    "c1",
+                ],
+                [
+                    "EmailSubmission/set",
+                    {
+                        "accountId": "i",
+                        "create": {
+                            "sub1": {
+                                "identityId": "d",
+                                "emailId": "#k1",
+                                "envelope": {
+                                    "mailFrom": {"email": from_email},
+                                    "rcptTo": [{"email": to_email}],
+                                },
+                            }
+                        },
+                        "onSuccessDestroyEmail": ["#sub1"],
+                    },
+                    "c2",
+                ],
+            ],
+        }
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode(),
+            headers={"Authorization": f"Basic {b64}", "Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=self._timeout) as resp:
+            data = json.loads(resp.read().decode())
+            resps = data.get("methodResponses", [])
+            for r in resps:
+                if r[0] == "error":
+                    raise MailError(f"JMAP falhou: {r[1]}")
+            logger.info("mail.jmap_sent_ok", to=to_email, subject=subject[:80])
+            return {}
 
     async def verify_login(self) -> None:
         await asyncio.to_thread(self._verify_login_sync)

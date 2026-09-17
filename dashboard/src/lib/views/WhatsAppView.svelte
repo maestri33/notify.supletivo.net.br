@@ -12,7 +12,11 @@
   let loading = $state(false);
   let selectedInstance = $state<WhatsAppInstance | null>(null);
   let qrModalOpen = $state(false);
-  let pairingCode = $state('8391-2401');
+  let connectModalOpen = $state(false);
+  let connectLoading = $state(false);
+  let newInstanceName = $state('principal');
+  let newPhoneNumber = $state('+5543996648750');
+  let returnedCode = $state<string | null>(null);
 
   async function loadInstances() {
     loading = true;
@@ -28,6 +32,32 @@
     qrModalOpen = true;
   }
 
+  async function handleConnect() {
+    if (!newInstanceName.trim() || !newPhoneNumber.trim()) return;
+    connectLoading = true;
+    returnedCode = null;
+    try {
+      const res = await api.connectWhatsApp(auth.backendUrl, auth.apiKey, {
+        instance_name: newInstanceName.trim(),
+        phone_number: newPhoneNumber.trim().replace(/\D/g, ''),
+        account_slug: auth.accountSlug,
+      });
+      if (res.success) {
+        if (res.code) {
+          returnedCode = res.code;
+        } else {
+          alert('Instância registrada no banco e fila de conexão iniciada!');
+          connectModalOpen = false;
+        }
+        await loadInstances();
+      } else {
+        alert(`Erro ao conectar: ${res.error || 'Falha na conexão'}`);
+      }
+    } finally {
+      connectLoading = false;
+    }
+  }
+
   onMount(() => {
     loadInstances();
   });
@@ -41,17 +71,30 @@
       <p class="text-sm text-white/50 font-body">Gerenciamento do pool de instâncias para despacho e canal de OTP.</p>
     </div>
 
-    <Button
-      variant="secondary"
-      size="sm"
-      loading={loading}
-      onclick={loadInstances}
-    >
-      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-      </svg>
-      <span>Sincronizar Instâncias</span>
-    </Button>
+    <div class="flex items-center gap-3">
+      <Button
+        variant="primary"
+        size="sm"
+        onclick={() => (connectModalOpen = true)}
+      >
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+        </svg>
+        <span>Adicionar Instância</span>
+      </Button>
+
+      <Button
+        variant="secondary"
+        size="sm"
+        loading={loading}
+        onclick={loadInstances}
+      >
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+        </svg>
+        <span>Sincronizar Instâncias</span>
+      </Button>
+    </div>
   </div>
 
   <!-- Multi-instance status & Circuit Breaker info -->
@@ -177,4 +220,60 @@
       Fechar
     </Button>
   {/snippet}
+</Modal>
+
+<!-- Modal Adicionar Instância -->
+<Modal
+  open={connectModalOpen}
+  title="Conectar Nova Instância WhatsApp"
+  onclose={() => (connectModalOpen = false)}
+>
+  <div class="space-y-4">
+    <p class="text-xs text-white/60">
+      Cadastre o identificador da instância e o número de telefone com DDD (E.164). O sistema registrará no pool da Evolution GO e gerará o código de pareamento numérico de 8 dígitos.
+    </p>
+
+    {#if returnedCode}
+      <div class="p-6 rounded-2xl bg-brand-green/10 border border-brand-green/30 text-center space-y-3">
+        <span class="text-xs font-semibold text-emerald-400 uppercase tracking-widest">Código de Pareamento de 8 Dígitos</span>
+        <div class="font-display text-4xl text-white tracking-widest select-all">{returnedCode}</div>
+        <p class="text-xs text-white/70">
+          Abra o WhatsApp no celular &gt; <strong>Aparelhos Conectados</strong> &gt; <strong>Conectar com número de telefone</strong> e digite o código acima (expira em 120s).
+        </p>
+      </div>
+    {:else}
+      <div>
+        <label for="new-instance-name" class="block text-xs font-semibold text-white/50 uppercase tracking-wider mb-1.5">Nome da Instância</label>
+        <input
+          id="new-instance-name"
+          type="text"
+          placeholder="ex: principal"
+          bind:value={newInstanceName}
+          class="w-full h-11 px-4 rounded-xl bg-white/5 border border-white/10 text-white placeholder-white/30 text-sm focus:outline-none focus:border-brand-green"
+        />
+      </div>
+
+      <div>
+        <label for="new-instance-phone" class="block text-xs font-semibold text-white/50 uppercase tracking-wider mb-1.5">Número de Telefone (com DDD)</label>
+        <input
+          id="new-instance-phone"
+          type="text"
+          placeholder="ex: +5543996648750"
+          bind:value={newPhoneNumber}
+          class="w-full h-11 px-4 rounded-xl bg-white/5 border border-white/10 text-white placeholder-white/30 text-sm focus:outline-none focus:border-brand-green"
+        />
+      </div>
+    {/if}
+
+    <div class="flex justify-end gap-3 pt-3">
+      <Button variant="secondary" size="sm" onclick={() => (connectModalOpen = false)}>
+        {returnedCode ? 'Concluir' : 'Cancelar'}
+      </Button>
+      {#if !returnedCode}
+        <Button variant="primary" size="sm" loading={connectLoading} onclick={handleConnect}>
+          <span>Gerar Pareamento</span>
+        </Button>
+      {/if}
+    </div>
+  </div>
 </Modal>

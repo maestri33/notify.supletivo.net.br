@@ -301,6 +301,67 @@ export class ApiClient {
     return this.getEmailIdentities(backendUrl, apiKey);
   }
 
+  async createEmailIdentity(
+    backendUrl: string,
+    apiKey: string,
+    payload: { local_part: string; domain: string; from_name: string; account_slug?: string }
+  ): Promise<{ success: boolean; from_email?: string; error?: string }> {
+    try {
+      const res = await fetch(`${backendUrl.replace(/\/$/, '')}/v1/admin/email/identities`, {
+        method: 'POST',
+        headers: {
+          ...this.getHeaders(apiKey, payload.account_slug || 'default'),
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          account_slug: payload.account_slug || 'default',
+          local_part: payload.local_part,
+          domain: payload.domain,
+          from_name: payload.from_name,
+        }),
+        signal: AbortSignal.timeout(10000),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        return { success: true, from_email: data.from_email };
+      }
+      const errData = await res.json().catch(() => ({}));
+      return { success: false, error: errData.message || `HTTP ${res.status}` };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Erro de conexão' };
+    }
+  }
+
+  async connectWhatsApp(
+    backendUrl: string,
+    apiKey: string,
+    payload: { instance_name: string; phone_number: string; account_slug?: string }
+  ): Promise<{ success: boolean; code?: string; error?: string }> {
+    try {
+      const res = await fetch(`${backendUrl.replace(/\/$/, '')}/v1/admin/whatsapp/connect`, {
+        method: 'POST',
+        headers: {
+          ...this.getHeaders(apiKey, payload.account_slug || 'default'),
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          account_slug: payload.account_slug || 'default',
+          instance_name: payload.instance_name,
+          phone_number: payload.phone_number,
+        }),
+        signal: AbortSignal.timeout(10000),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        return { success: true, code: data.code };
+      }
+      const errData = await res.json().catch(() => ({}));
+      return { success: false, error: errData.message || `HTTP ${res.status}` };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Erro de conexão' };
+    }
+  }
+
   async requeueNotification(backendUrl: string, apiKey: string, id: string): Promise<boolean> {
     try {
       const res = await fetch(`${backendUrl.replace(/\/$/, '')}/v1/notifications/${id}/requeue`, {

@@ -262,3 +262,112 @@ def list_email_identities(request):
     ]
     return {"identities": identities}
 
+
+class CreateEmailIdentityIn(Schema):
+    account_slug: str = Field(default="default")
+    local_part: str = Field(..., max_length=100)
+    domain: str = Field(default="supletivo.net.br", max_length=100)
+    from_name: str = Field(default="Notify", max_length=100)
+
+
+@router.post(
+    "/email/identities",
+    summary="Cria uma nova identidade/caixa postal no Stalwart",
+)
+def create_email_identity(request, payload: CreateEmailIdentityIn):
+    api_key_auth(request)
+    from django.conf import settings
+    from accounts.models import Account
+    from channels.models import MailIdentity
+    from mail.stalwart import StalwartClient
+
+    account = Account.objects.filter(slug=payload.account_slug).first()
+    if account is None:
+        raise HttpError(404, f"Conta '{payload.account_slug}' não encontrada")
+
+    client = StalwartClient()
+    mailbox, password, created = client.ensure_mailbox(
+        local_part=payload.local_part,
+        domain=payload.domain,
+        name=payload.from_name,
+    )
+    from_email = f"{payload.local_part}@{payload.domain}".lower()
+    identity, _ = MailIdentity.objects.get_or_create(
+        account=account,
+        from_email=from_email,
+        defaults={
+            "from_name": payload.from_name,
+            "smtp_host": getattr(settings, "STALWART_SMTP_HOST", "10.0.1.20"),
+            "smtp_port": getattr(settings, "STALWART_SMTP_PORT", 587),
+            "is_default": True,
+        },
+    )
+    if password:
+        from mail import crypto
+        identity.smtp_password = crypto.encrypt(password)
+        identity.save()
+
+    return {
+        "success": True,
+        "from_email": from_email,
+        "from_name": payload.from_name,
+        "created": created,
+    }
+
+
+class ConnectWhatsAppIn(Schema):
+    account_slug: str = Field(default="default")
+    instance_name: str = Field(..., max_length=100)
+    phone_number: str = Field(..., max_length=30)
+
+
+@router.post(
+    "/whatsapp/connect",
+    summary="Registra instância e gera código de pareamento do WhatsApp",
+)
+def connect_whatsapp(request, payload: ConnectWhatsAppIn):
+    api_key_auth(request)
+    from accounts.models import Account
+    from channels.models import WhatsAppNumber, DRIVER_GO
+    from whatsapp import provisioning as wa
+
+    account = Account.objects.filter(slug=payload.account_slug).first()
+    if account is None:
+        raise HttpError(404, f"Conta '{payload.account_slug}' não encontrada")
+
+    instance, created = wa.go_ensure_instance(instance_name=payload.instance_name)
+    token = str(instance.get("token") or "")
+
+    number, _ = WhatsAppNumber.objects.get_or_create(
+        account=account,
+        slug=payload.instance_name.lower().replace(" ", "-"),
+        defaults={
+            "instance_name": payload.instance_name,
+            "phone_number": payload.phone_number,
+            "driver": DRIVER_GO,
+            "is_default": True,
+        },
+    )
+    number.instance_name = payload.instance_name
+    number.phone_number = payload.phone_number
+    number.driver = DRIVER_GO
+    if token:
+        number.set_go_token(token)
+    number.save()
+
+    code = ""
+    try:
+        if token and payload.phone_number:
+            code = wa.go_pairing_code(token, payload.phone_number)
+    except Exception as exc:
+        logger.warning("whatsapp.pairing_code_warning", error=str(exc))
+
+    return {
+        "success": True,
+        "instance_name": payload.instance_name,
+        "phone_number": payload.phone_number,
+        "token_registered": bool(token),
+        "code": code or None,
+    }
+
+

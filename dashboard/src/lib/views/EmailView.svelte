@@ -7,6 +7,8 @@
   import StatusBadge from '../components/ui/StatusBadge.svelte';
   import Button from '../components/ui/Button.svelte';
 
+  import Modal from '../components/ui/Modal.svelte';
+
   interface Props {
     onsettab: (tab: string) => void;
   }
@@ -15,6 +17,11 @@
 
   let identities = $state<MailIdentity[]>([]);
   let loading = $state(false);
+  let createModalOpen = $state(false);
+  let createLoading = $state(false);
+  let newLocalPart = $state('atendimento');
+  let newDomain = $state('supletivo.net.br');
+  let newName = $state('Supletivo Brasil Atendimento');
 
   const templates = [
     { id: 'auth.otp', name: 'Código de Verificação OTP', subject: 'Seu código de acesso: {{ code }}', type: 'Transacional' },
@@ -32,6 +39,28 @@
     }
   }
 
+  async function handleCreateIdentity() {
+    if (!newLocalPart.trim()) return;
+    createLoading = true;
+    try {
+      const res = await api.createEmailIdentity(auth.backendUrl, auth.apiKey, {
+        local_part: newLocalPart.trim(),
+        domain: newDomain,
+        from_name: newName.trim() || 'Notify',
+        account_slug: auth.accountSlug,
+      });
+      if (res.success) {
+        alert(`Identidade ${res.from_email} criada com sucesso no Stalwart!`);
+        createModalOpen = false;
+        await loadIdentities();
+      } else {
+        alert(`Erro ao criar identidade: ${res.error || 'Falha desconhecida'}`);
+      }
+    } finally {
+      createLoading = false;
+    }
+  }
+
   onMount(() => {
     loadIdentities();
   });
@@ -45,17 +74,86 @@
       <p class="text-sm text-white/50 font-body">Identidades de envio, autenticação DKIM/SPF e templates de comunicação.</p>
     </div>
 
-    <Button
-      variant="yellow"
-      size="sm"
-      onclick={() => onsettab('send')}
-    >
-      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-      </svg>
-      <span>Testar Envio</span>
-    </Button>
+    <div class="flex items-center gap-3">
+      <Button
+        variant="primary"
+        size="sm"
+        onclick={() => (createModalOpen = true)}
+      >
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+        </svg>
+        <span>Nova Identidade</span>
+      </Button>
+
+      <Button
+        variant="yellow"
+        size="sm"
+        onclick={() => onsettab('send')}
+      >
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+        </svg>
+        <span>Testar Envio</span>
+      </Button>
+    </div>
   </div>
+
+  <!-- Modal Criar Identidade -->
+  <Modal
+    open={createModalOpen}
+    title="Criar Nova Identidade no Stalwart"
+    onclose={() => (createModalOpen = false)}
+  >
+    <div class="space-y-4">
+      <p class="text-xs text-white/60">
+        Esta ação cria a caixa postal correspondente no servidor Stalwart com provisionamento de credenciais e autenticação DKIM/SPF automática.
+      </p>
+
+      <div>
+        <label for="new-local-part" class="block text-xs font-semibold text-white/50 uppercase tracking-wider mb-1.5">Usuário (Local-part)</label>
+        <input
+          id="new-local-part"
+          type="text"
+          placeholder="ex: atendimento"
+          bind:value={newLocalPart}
+          class="w-full h-11 px-4 rounded-xl bg-white/5 border border-white/10 text-white placeholder-white/30 text-sm focus:outline-none focus:border-brand-green"
+        />
+      </div>
+
+      <div>
+        <label for="new-domain" class="block text-xs font-semibold text-white/50 uppercase tracking-wider mb-1.5">Domínio Autorizado</label>
+        <select
+          id="new-domain"
+          bind:value={newDomain}
+          class="w-full h-11 px-3 rounded-xl bg-brand-ink border border-white/10 text-white text-sm focus:outline-none focus:border-brand-green"
+        >
+          <option value="supletivo.net.br">supletivo.net.br</option>
+          <option value="v7m.org">v7m.org</option>
+          <option value="ieadpg.org">ieadpg.org</option>
+          <option value="maestri.group">maestri.group</option>
+        </select>
+      </div>
+
+      <div>
+        <label for="new-name" class="block text-xs font-semibold text-white/50 uppercase tracking-wider mb-1.5">Nome do Remetente (From Name)</label>
+        <input
+          id="new-name"
+          type="text"
+          placeholder="ex: Supletivo Brasil Atendimento"
+          bind:value={newName}
+          class="w-full h-11 px-4 rounded-xl bg-white/5 border border-white/10 text-white placeholder-white/30 text-sm focus:outline-none focus:border-brand-green"
+        />
+      </div>
+
+      <div class="flex justify-end gap-3 pt-3">
+        <Button variant="secondary" size="sm" onclick={() => (createModalOpen = false)}>Cancelar</Button>
+        <Button variant="primary" size="sm" loading={createLoading} onclick={handleCreateIdentity}>
+          <span>Criar e Registrar</span>
+        </Button>
+      </div>
+    </div>
+  </Modal>
 
   <!-- Mail Identities -->
   <div>
