@@ -70,60 +70,74 @@
   </div>
 
   <!-- Instances Grid -->
-  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-    {#each instances as inst}
-      <GlassPanel class="flex flex-col justify-between space-y-4">
-        <div>
-          <div class="flex items-start justify-between gap-2 mb-3">
-            <div>
-              <h3 class="font-display text-lg text-white tracking-tight">{inst.instance_name}</h3>
-              <div class="text-xs font-mono text-white/50">{inst.phone}</div>
+  {#if instances.length === 0}
+    <GlassPanel class="text-center py-12 space-y-3">
+      <div class="p-3 rounded-full bg-white/5 inline-block text-white/40">
+        <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+        </svg>
+      </div>
+      <div class="text-base font-display text-white">Nenhuma Instância Cadastrada</div>
+      <p class="text-xs text-white/50 max-w-sm mx-auto font-body">
+        Não há instâncias da Evolution GO configuradas para esta conta no banco de dados. Cadastre sua instância no backend para gerenciar o pool de disparos.
+      </p>
+    </GlassPanel>
+  {:else}
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      {#each instances as inst}
+        <GlassPanel class="flex flex-col justify-between space-y-4">
+          <div>
+            <div class="flex items-start justify-between gap-2 mb-3">
+              <div>
+                <h3 class="font-display text-lg text-white tracking-tight">{inst.instance_name}</h3>
+                <div class="text-xs font-mono text-white/50">{inst.phone}</div>
+              </div>
+              <StatusBadge status={inst.status} />
             </div>
-            <StatusBadge status={inst.status} />
+
+            <div class="p-3 rounded-xl bg-white/5 border border-white/5 space-y-1.5 text-xs">
+              <div class="flex justify-between text-white/60">
+                <span>Driver:</span>
+                <span class="font-mono text-white">EvolutionGoDriver</span>
+              </div>
+              <div class="flex justify-between text-white/60">
+                <span>Atualizado em:</span>
+                <span class="font-mono text-white/80">{new Date(inst.updated_at).toLocaleTimeString('pt-BR')}</span>
+              </div>
+            </div>
           </div>
 
-          <div class="p-3 rounded-xl bg-white/5 border border-white/5 space-y-1.5 text-xs">
-            <div class="flex justify-between text-white/60">
-              <span>Driver:</span>
-              <span class="font-mono text-white">EvolutionGoDriver</span>
-            </div>
-            <div class="flex justify-between text-white/60">
-              <span>Atualizado em:</span>
-              <span class="font-mono text-white/80">{new Date(inst.updated_at).toLocaleTimeString('pt-BR')}</span>
-            </div>
+          <div class="pt-2 flex gap-2">
+            {#if inst.status === 'open'}
+              <Button
+                variant="secondary"
+                size="sm"
+                class="w-full"
+                onclick={() => alert(`Instância ${inst.instance_name} está conectada e operando normalmente.`)}
+              >
+                <svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                </svg>
+                <span>Conectado</span>
+              </Button>
+            {:else}
+              <Button
+                variant="yellow"
+                size="sm"
+                class="w-full"
+                onclick={() => openQrModal(inst)}
+              >
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" />
+                </svg>
+                <span>Conectar WhatsApp</span>
+              </Button>
+            {/if}
           </div>
-        </div>
-
-        <div class="pt-2 flex gap-2">
-          {#if inst.status === 'open'}
-            <Button
-              variant="secondary"
-              size="sm"
-              class="w-full"
-              onclick={() => alert(`Instância ${inst.instance_name} está conectada e operando normalmente.`)}
-            >
-              <svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-              </svg>
-              <span>Conectado</span>
-            </Button>
-          {:else}
-            <Button
-              variant="yellow"
-              size="sm"
-              class="w-full"
-              onclick={() => openQrModal(inst)}
-            >
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" />
-              </svg>
-              <span>Conectar WhatsApp</span>
-            </Button>
-          {/if}
-        </div>
-      </GlassPanel>
-    {/each}
-  </div>
+        </GlassPanel>
+      {/each}
+    </div>
+  {/if}
 </div>
 
 <!-- QR Code & Pairing Modal -->
@@ -133,51 +147,28 @@
   onclose={() => (qrModalOpen = false)}
 >
   <div class="space-y-6 text-center">
-    <div class="p-6 bg-white rounded-2xl inline-block shadow-2xl border border-white/20 mx-auto">
-      <!-- Simulated SVG QR Code -->
-      <svg class="w-48 h-48 mx-auto" viewBox="0 0 100 100" fill="none">
-        <rect width="100" height="100" fill="#ffffff" />
-        <!-- Top-left position probe -->
-        <rect x="10" y="10" width="28" height="28" fill="#0b1220" rx="4" />
-        <rect x="15" y="15" width="18" height="18" fill="#ffffff" rx="2" />
-        <rect x="19" y="19" width="10" height="10" fill="#00734d" rx="1" />
-        <!-- Top-right position probe -->
-        <rect x="62" y="10" width="28" height="28" fill="#0b1220" rx="4" />
-        <rect x="67" y="15" width="18" height="18" fill="#ffffff" rx="2" />
-        <rect x="71" y="19" width="10" height="10" fill="#00734d" rx="1" />
-        <!-- Bottom-left position probe -->
-        <rect x="10" y="62" width="28" height="28" fill="#0b1220" rx="4" />
-        <rect x="15" y="67" width="18" height="18" fill="#ffffff" rx="2" />
-        <rect x="19" y="71" width="10" height="10" fill="#00734d" rx="1" />
-        <!-- Decorative matrix pixels -->
-        <rect x="42" y="12" width="6" height="6" fill="#0b1220" />
-        <rect x="50" y="12" width="6" height="6" fill="#00734d" />
-        <rect x="42" y="24" width="6" height="6" fill="#0b1220" />
-        <rect x="42" y="36" width="6" height="6" fill="#ffc400" />
-        <rect x="52" y="36" width="6" height="6" fill="#0b1220" />
-        <rect x="64" y="44" width="6" height="6" fill="#00734d" />
-        <rect x="74" y="44" width="6" height="6" fill="#0b1220" />
-        <rect x="44" y="52" width="6" height="6" fill="#0b1220" />
-        <rect x="56" y="60" width="6" height="6" fill="#00734d" />
-        <rect x="44" y="74" width="6" height="6" fill="#ffc400" />
-        <rect x="64" y="74" width="6" height="6" fill="#0b1220" />
-        <rect x="80" y="74" width="6" height="6" fill="#00734d" />
-      </svg>
-    </div>
+    {#if selectedInstance?.qr_code_url}
+      <div class="p-4 bg-white rounded-2xl inline-block shadow-2xl border border-white/20 mx-auto">
+        <img
+          src={selectedInstance.qr_code_url}
+          alt="QR Code WhatsApp"
+          class="w-48 h-48 mx-auto"
+        />
+      </div>
+    {:else}
+      <div class="p-8 rounded-2xl bg-white/5 border border-white/10 max-w-md mx-auto text-white/50 text-xs space-y-2">
+        <svg class="w-10 h-10 mx-auto text-white/30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" />
+        </svg>
+        <p>Aguardando disponibilização do stream do QR Code pela Evolution GO...</p>
+      </div>
+    {/if}
 
     <div class="space-y-2">
-      <div class="text-xs uppercase tracking-wider text-white/50 font-semibold">Instruções de Conexão</div>
-      <p class="text-sm text-white/80 max-w-md mx-auto">
-        1. Abra o WhatsApp no aparelho celular.<br/>
-        2. Toque em <strong>Configurações &gt; Dispositivos Conectados</strong>.<br/>
-        3. Aponte a câmera para o QR Code acima.
+      <div class="text-xs uppercase tracking-wider text-white/50 font-semibold">Instruções de Pareamento</div>
+      <p class="text-sm text-white/80 max-w-md mx-auto font-body">
+        Abra o WhatsApp no celular, vá em <strong>Configurações &gt; Dispositivos Conectados</strong> e aponte para o QR Code da instância ou use o pareamento de 8 dígitos.
       </p>
-    </div>
-
-    <!-- Pairing Code Alternative -->
-    <div class="p-4 rounded-xl bg-white/5 border border-white/10 max-w-md mx-auto">
-      <div class="text-xs text-white/60 mb-1">Ou conecte com código de pareamento numérico:</div>
-      <div class="font-mono font-display text-2xl text-brand-yellow tracking-widest">{pairingCode}</div>
     </div>
   </div>
 

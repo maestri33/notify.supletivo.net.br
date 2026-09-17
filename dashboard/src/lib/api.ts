@@ -114,15 +114,14 @@ export class ApiClient {
       console.warn('Real metrics fetch error:', err);
     }
 
-    // Default snapshot for offline or initial load
     return {
-      total_volume_24h: 14820,
-      delivered_count_24h: 14732,
-      failed_count_24h: 88,
-      success_rate_percent: 99.4,
-      whatsapp_volume_24h: 11240,
-      email_volume_24h: 3580,
-      queue_backlog: 3,
+      total_volume_24h: 0,
+      delivered_count_24h: 0,
+      failed_count_24h: 0,
+      success_rate_percent: 0,
+      whatsapp_volume_24h: 0,
+      email_volume_24h: 0,
+      queue_backlog: 0,
       last_updated: new Date().toISOString(),
     };
   }
@@ -147,98 +146,31 @@ export class ApiClient {
       if (res.ok) {
         const data = await res.json();
         const items = Array.isArray(data) ? data : data.items || [];
-        if (items.length > 0) {
-          return items.map((item: any) => ({
-            id: String(item.external_id || item.id),
-            account_slug: accountSlug || 'default',
-            channel: (item.want_whatsapp || item.recipient_phone) ? 'whatsapp' : 'email',
-            recipient: item.recipient_phone || item.recipient_email || '—',
-            subject: item.subject || item.title || item.text?.slice(0, 40) || 'Sem assunto',
-            status: (item.whatsapp_status === 'sent' || item.email_status === 'sent')
-              ? 'sent'
-              : (item.whatsapp_status === 'failed' || item.email_status === 'failed')
-              ? 'failed'
-              : (item.whatsapp_status === 'pending' || item.email_status === 'pending')
-              ? 'queued'
-              : 'dispatched',
-            idempotency_key: item.idempotency_key,
-            payload_json: JSON.stringify(item, null, 2),
-            error_message: item.whatsapp_error || item.email_error,
-            created_at: String(item.created_at || new Date().toISOString()),
-            driver_used: item.caller || 'Standard',
-          }));
-        }
+        return items.map((item: any) => ({
+          id: String(item.external_id || item.id),
+          account_slug: accountSlug || 'default',
+          channel: (item.want_whatsapp || item.recipient_phone) ? 'whatsapp' : 'email',
+          recipient: item.recipient_phone || item.recipient_email || '—',
+          subject: item.subject || item.title || item.text?.slice(0, 40) || 'Sem assunto',
+          status: (item.whatsapp_status === 'sent' || item.email_status === 'sent')
+            ? 'sent'
+            : (item.whatsapp_status === 'failed' || item.email_status === 'failed')
+            ? 'failed'
+            : (item.whatsapp_status === 'pending' || item.email_status === 'pending')
+            ? 'queued'
+            : 'dispatched',
+          idempotency_key: item.idempotency_key,
+          payload_json: JSON.stringify(item, null, 2),
+          error_message: item.whatsapp_error || item.email_error,
+          created_at: String(item.created_at || new Date().toISOString()),
+          driver_used: item.caller || 'Standard',
+        }));
       }
     } catch (err) {
       console.warn('Real notifications fetch error:', err);
     }
 
-    // Retorna histórico padrão demonstrativo representativo de produção
-    const mockList: NotificationRecord[] = [
-      {
-        id: 'ntf-8891-auth-otp',
-        account_slug: accountSlug || 'default',
-        channel: 'whatsapp',
-        recipient: '5511987654321',
-        status: 'sent',
-        idempotency_key: 'otp-session-0916-a1',
-        payload_json: JSON.stringify({ caller: 'users.auth.otp', code: '492815', is_otp: true }),
-        created_at: new Date(Date.now() - 45000).toISOString(),
-        driver_used: 'go:inst_1',
-      },
-      {
-        id: 'ntf-8890-lead-welcome',
-        account_slug: accountSlug || 'default',
-        channel: 'whatsapp',
-        recipient: '5521998887766',
-        status: 'sent',
-        idempotency_key: 'lead-cap-2026-b8',
-        payload_json: JSON.stringify({ template: 'welcome_lead_v2', lead_name: 'Lucas Ferreira' }),
-        created_at: new Date(Date.now() - 120000).toISOString(),
-        driver_used: 'go:inst_2',
-      },
-      {
-        id: 'ntf-8889-doc-approved',
-        account_slug: accountSlug || 'default',
-        channel: 'email',
-        recipient: 'mariana.silva@email.com',
-        subject: 'Documentação Aprovada — Supletivo Brasil',
-        status: 'dispatched',
-        idempotency_key: 'doc-appr-3391',
-        payload_json: JSON.stringify({ template: 'doc_verified_html', doc_type: 'CNH' }),
-        created_at: new Date(Date.now() - 340000).toISOString(),
-        driver_used: 'stalwart:smtp',
-      },
-      {
-        id: 'ntf-8888-pix-invoice',
-        account_slug: accountSlug || 'default',
-        channel: 'whatsapp',
-        recipient: '5541991112233',
-        status: 'sent',
-        idempotency_key: 'pix-inv-40192',
-        payload_json: JSON.stringify({ value: '189.00', qr_url: '/media/qr/pix-invoice-40192.png' }),
-        created_at: new Date(Date.now() - 600000).toISOString(),
-        driver_used: 'go:inst_1',
-      },
-      {
-        id: 'ntf-8887-bulk-broadcast',
-        account_slug: accountSlug || 'default',
-        channel: 'email',
-        recipient: 'aluno.inativo@email.com',
-        subject: 'Retome seu Ensino Médio com 30% OFF',
-        status: 'queued',
-        payload_json: JSON.stringify({ campaign_id: 'recup-set-2026' }),
-        created_at: new Date(Date.now() - 900000).toISOString(),
-      },
-    ];
-
-    if (filters.channel && filters.channel !== 'all') {
-      return mockList.filter((m) => m.channel === filters.channel);
-    }
-    if (filters.status && filters.status !== 'all') {
-      return mockList.filter((m) => m.status === filters.status);
-    }
-    return mockList;
+    return [];
   }
 
   // ── 4. Dispatch Simulator ─────────────────────────────────────────────────
@@ -324,26 +256,7 @@ export class ApiClient {
       // Ignore
     }
 
-    return [
-      {
-        instance_name: 'inst_1',
-        phone: '5511999990001',
-        status: 'open',
-        updated_at: new Date().toISOString(),
-      },
-      {
-        instance_name: 'inst_2',
-        phone: '5511999990002',
-        status: 'open',
-        updated_at: new Date().toISOString(),
-      },
-      {
-        instance_name: 'inst_3_fallback',
-        phone: '5511999990003',
-        status: 'connecting',
-        updated_at: new Date().toISOString(),
-      },
-    ];
+    return [];
   }
 
   // ── 6. Email Identities ───────────────────────────────────────────────────
@@ -361,24 +274,7 @@ export class ApiClient {
       // Ignore
     }
 
-    return [
-      {
-        from_email: 'contato@supletivo.net.br',
-        from_name: 'Supletivo Brasil',
-        smtp_host: 'mail.supletivo.net.br',
-        smtp_port: 587,
-        dkim_status: 'valid',
-        spf_status: 'valid',
-      },
-      {
-        from_email: 'notificacoes@supletivo.net.br',
-        from_name: 'Supletivo Alertas',
-        smtp_host: 'mail.supletivo.net.br',
-        smtp_port: 587,
-        dkim_status: 'valid',
-        spf_status: 'valid',
-      },
-    ];
+    return [];
   }
 
   // ── 7. Helpers & Aliases ──────────────────────────────────────────────────

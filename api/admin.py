@@ -220,3 +220,45 @@ def pairing_code(request, payload: PairIn):
     except ProvisioningError as exc:
         raise HttpError(502, str(exc)) from exc
     return {"phone_number": number.phone_number, "code": code, "expira_em_segundos": 120}
+
+
+@router.get(
+    "/whatsapp/instances",
+    summary="Listagem real das instâncias cadastradas de WhatsApp",
+)
+def list_whatsapp_instances(request):
+    api_key_auth(request)
+    from channels.models import WhatsAppNumber
+    numbers = WhatsAppNumber.objects.select_related("account").all()
+    instances = [
+        {
+            "instance_name": n.instance_name or n.slug,
+            "phone": n.phone_number or "Não configurado",
+            "status": n.connection_status if n.connection_status in ["open", "connecting", "close", "pareando"] else "close",
+            "updated_at": (n.status_checked_at or n.created_at).isoformat(),
+        }
+        for n in numbers
+    ]
+    return {"instances": instances}
+
+
+@router.get(
+    "/email/identities",
+    summary="Listagem real das identidades cadastradas de E-mail",
+)
+def list_email_identities(request):
+    api_key_auth(request)
+    from channels.models import MailIdentity
+    identities = [
+        {
+            "from_email": m.from_email,
+            "from_name": m.from_name,
+            "smtp_host": m.smtp_host,
+            "smtp_port": m.smtp_port,
+            "dkim_status": "valid" if m.smtp_host else "missing",
+            "spf_status": "valid" if m.smtp_host else "missing",
+        }
+        for m in MailIdentity.objects.select_related("account").all()
+    ]
+    return {"identities": identities}
+

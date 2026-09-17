@@ -4,14 +4,14 @@ import type { ServiceHealth } from '../types';
 
 export class HealthStore {
   health = $state<ServiceHealth>({
-    edge: 'healthy',
-    d1: 'connected',
-    r2: 'connected',
-    workers_ai: 'ready',
-    evolution_go: 'connected',
-    stalwart: 'connected',
+    edge: 'offline',
+    d1: 'offline',
+    r2: 'not_bound',
+    workers_ai: 'not_bound',
+    evolution_go: 'unreachable',
+    stalwart: 'unreachable',
     environment: 'production',
-    checked_at: new Date().toISOString(),
+    checked_at: '',
   });
   loading = $state(false);
 

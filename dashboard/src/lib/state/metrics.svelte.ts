@@ -4,14 +4,14 @@ import type { MetricsSummary } from '../types';
 
 export class MetricsStore {
   metrics = $state<MetricsSummary>({
-    total_volume_24h: 12480,
-    delivered_count_24h: 12293,
-    failed_count_24h: 187,
-    success_rate_percent: 98.5,
-    whatsapp_volume_24h: 8930,
-    email_volume_24h: 3550,
-    queue_backlog: 14,
-    last_updated: new Date().toISOString(),
+    total_volume_24h: 0,
+    delivered_count_24h: 0,
+    failed_count_24h: 0,
+    success_rate_percent: 0,
+    whatsapp_volume_24h: 0,
+    email_volume_24h: 0,
+    queue_backlog: 0,
+    last_updated: '',
   });
   loading = $state(false);
 

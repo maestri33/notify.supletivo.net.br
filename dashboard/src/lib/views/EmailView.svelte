@@ -60,61 +60,64 @@
   <!-- Mail Identities -->
   <div>
     <h2 class="font-display text-lg text-white mb-3">Identidades Autorizadas</h2>
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-      {#each identities as iden}
-        <GlassPanel class="space-y-4">
-          <div class="flex items-start justify-between gap-4">
-            <div>
-              <h3 class="font-display text-base text-white">{iden.from_name}</h3>
-              <div class="font-mono text-xs text-brand-yellow">{iden.from_email}</div>
+    {#if identities.length === 0}
+      <GlassPanel class="text-center py-10 space-y-3">
+        <div class="p-3 rounded-full bg-white/5 inline-block text-white/40">
+          <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+          </svg>
+        </div>
+        <div class="text-base font-display text-white">Nenhuma Identidade Configurada</div>
+        <p class="text-xs text-white/50 max-w-sm mx-auto font-body">
+          Não há caixas de envio ou identidades SMTP/JMAP configuradas no Stalwart Mail Server para este tenant.
+        </p>
+      </GlassPanel>
+    {:else}
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {#each identities as iden}
+          <GlassPanel class="space-y-4">
+            <div class="flex items-start justify-between gap-4">
+              <div>
+                <h3 class="font-display text-base text-white">{iden.from_name}</h3>
+                <div class="font-mono text-xs text-brand-yellow">{iden.from_email}</div>
+              </div>
+              <span class="text-xs px-2 py-0.5 rounded bg-white/10 text-white/70 font-mono">SMTP/JMAP</span>
             </div>
-            <span class="text-xs px-2 py-0.5 rounded bg-white/10 text-white/70 font-mono">SMTP/JMAP</span>
-          </div>
 
-          <div class="grid grid-cols-2 gap-3 p-3 rounded-xl bg-white/5 border border-white/5 text-xs">
-            <div>
-              <span class="text-white/50 block mb-1">DKIM Signature:</span>
-              <StatusBadge status={iden.dkim_status} />
+            <div class="grid grid-cols-2 gap-3 p-3 rounded-xl bg-white/5 border border-white/5 text-xs">
+              <div>
+                <span class="text-white/50 block mb-1">DKIM Signature:</span>
+                <StatusBadge status={iden.dkim_status} />
+              </div>
+              <div>
+                <span class="text-white/50 block mb-1">SPF Record:</span>
+                <StatusBadge status={iden.spf_status} />
+              </div>
+              <div class="col-span-2 pt-2 border-t border-white/5 flex justify-between font-mono text-white/60">
+                <span>Host: {iden.smtp_host}:{iden.smtp_port}</span>
+                <span class="text-emerald-400">TLS 1.3 Active</span>
+              </div>
             </div>
-            <div>
-              <span class="text-white/50 block mb-1">SPF Record:</span>
-              <StatusBadge status={iden.spf_status} />
-            </div>
-            <div class="col-span-2 pt-2 border-t border-white/5 flex justify-between font-mono text-white/60">
-              <span>Host: {iden.smtp_host}:{iden.smtp_port}</span>
-              <span class="text-emerald-400">TLS 1.3 Active</span>
-            </div>
-          </div>
-        </GlassPanel>
-      {/each}
-    </div>
+          </GlassPanel>
+        {/each}
+      </div>
+    {/if}
   </div>
 
   <!-- Templates -->
   <GlassPanel class="space-y-4">
     <div class="flex items-center justify-between">
       <div>
-        <h2 class="font-display text-lg text-white">Templates Transacionais Cadastrados</h2>
-        <p class="text-xs text-white/50">Modelos pré-autorizados para disparo via API</p>
+        <h2 class="font-display text-lg text-white">Shells & Templates de E-mail</h2>
+        <p class="text-xs text-white/50">Modelos transacionais vinculados à conta</p>
       </div>
-      <span class="text-xs font-mono text-white/60">{templates.length} ativos</span>
     </div>
 
-    <div class="divide-y divide-white/5">
-      {#each templates as t}
-        <div class="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-          <div>
-            <div class="flex items-center gap-2">
-              <span class="font-semibold text-sm text-white">{t.name}</span>
-              <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-white/10 text-white/70">{t.type}</span>
-            </div>
-            <div class="text-xs text-white/40 font-mono mt-0.5">Assunto: {t.subject}</div>
-          </div>
-          <div class="font-mono text-xs text-white/50 bg-white/5 px-2 py-1 rounded">
-            template_id: {t.id}
-          </div>
-        </div>
-      {/each}
+    <div class="p-6 rounded-xl bg-white/5 border border-white/5 text-xs text-white/60 space-y-2">
+      <div class="font-semibold text-white">Shell Padrão do Sistema (`default.html`)</div>
+      <p>
+        O envio transacional utiliza o template unificado com identidade visual oficial (logo Supletivo Brasil, tipografia Inter, contraste WCAG AAA e tag obrigatória <code>&#123;&#123;content&#125;&#125;</code>).
+      </p>
     </div>
   </GlassPanel>
 </div>
