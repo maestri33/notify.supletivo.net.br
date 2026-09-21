@@ -28,6 +28,22 @@ export const app = new Hono<{ Bindings: Env }>();
 
 app.use('*', cors());
 
+// ── 0. Root Service Info ───────────────────────────────────────────────────
+app.get('/', (c) => {
+  return c.json({
+    service: 'notify-edge',
+    status: 'ok',
+    domain: 'notify.supletivo.net.br',
+    endpoints: {
+      health: '/health',
+      notify: '/notify',
+      v1_send: '/v1/send',
+      media: '/media/:key',
+      mcp: '/mcp',
+    },
+  });
+});
+
 // ── 1. Health Check (Edge + D1 + R2 + AI) ──────────────────────────────────
 app.get('/health', async (c) => {
   const checks: Record<string, any> = {

@@ -36,4 +36,15 @@ describe('GET /health probe', () => {
     expect(body.checks.r2).toBe('not_bound');
     expect(body.checks.workers_ai).toBe('not_bound');
   });
+
+  it('returns service info for GET / root endpoint', async () => {
+    const { env } = createMockEnv();
+    const res = await app.request('/', {}, env);
+
+    expect(res.status).toBe(200);
+    const body: any = await res.json();
+    expect(body.status).toBe('ok');
+    expect(body.service).toBe('notify-edge');
+    expect(body.domain).toBe('notify.supletivo.net.br');
+  });
 });
