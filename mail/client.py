@@ -72,7 +72,8 @@ class MailClient:
         msg.attach(MIMEText(html_body, "html", "utf-8"))
 
         refused = await asyncio.to_thread(self._send_sync, msg, to_email)
-        logger.info("mail.sent", to=to_email, subject=subject[:80], message_id=msg_id, refused=bool(refused))
+        safe_subject = subject.encode("ascii", errors="replace").decode("ascii")[:80]
+        logger.info("mail.sent", to=to_email, subject=safe_subject, message_id=msg_id, refused=bool(refused))
         return {
             "to": to_email,
             "subject": subject,
