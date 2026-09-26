@@ -467,7 +467,12 @@ def _record_provider(notif: Notification, driver, result) -> None:
 def _whatsapp_body(notif: Notification) -> str:
     body = sanitize.for_whatsapp(getattr(notif, "_wa_text", "") or notif.text)
     if notif.title:
-        return f"*{notif.title}*\n\n{body}"
+        title = notif.title.strip()
+        first_line = body.split("\n")[0].strip().lower() if body else ""
+        if not first_line.startswith(title.lower()):
+            if not title.lower().startswith("supletivo brasil"):
+                title = f"Supletivo Brasil • {title}"
+            return f"*{title}*\n\n{body}"
     return body
 
 
