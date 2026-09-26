@@ -797,9 +797,13 @@ def _send_email(notif: Notification) -> None:
             return
 
         client = _get_mail_client(notif)
-        if client is None:
+        cf_account_id = getattr(settings, "CLOUDFLARE_ACCOUNT_ID", "")
+        cf_token = getattr(settings, "CLOUDFLARE_EMAIL_TOKEN", "") or getattr(settings, "CLOUDFLARE_API_TOKEN", "")
+        cf_enabled = getattr(settings, "CLOUDFLARE_EMAIL_SENDING_ENABLED", False)
+
+        if client is None and not (cf_account_id and cf_token):
             notif.email_status = STATUS_FAILED
-            notif.email_error = "Nenhuma MailIdentity configurada para esta conta"
+            notif.email_error = "Nenhuma MailIdentity nem Cloudflare Email configurado para esta conta"
             return
 
         # Assunto: envio explícito > assunto do template da conta > título >
@@ -831,9 +835,66 @@ def _send_email(notif: Notification) -> None:
             html = mail_templates.render_for_account(
                 notif.account, notif.mail_template, title=notif.title or "", content=email_text,
             )
-        res = async_to_sync(client.send_email)(
-            notif.recipient_email, subject, html_body=html, plain_body=email_text
-        )
+
+        from_email = getattr(client, "_from_email", None) or "contato@supletivo.net.br"
+        from_name = getattr(client, "_from_name", None) or (shell.brand_name if shell and shell.brand_name else notif.account.name)
+
+        res = None
+        # 1. Se Cloudflare Email Sending estiver explicitamente ativo como prioritário
+        if cf_enabled and cf_account_id and cf_token:
+            try:
+                from mail.cloudflare_sending import CloudflareEmailSender
+                cf_sender = CloudflareEmailSender(account_id=cf_account_id, api_token=cf_token)
+                res = async_to_sync(cf_sender.send_email)(
+                    from_address=from_email,
+                    from_name=from_name,
+                    to_address=notif.recipient_email,
+                    subject=subject,
+                    html_body=html,
+                    text_body=email_text,
+                )
+                notif.driver_used = "cloudflare_email"
+            except Exception as cf_exc:
+                logger.warning("notify.cf_email_failed_trying_smtp", error=str(cf_exc))
+
+        # 2. Stalwart (SMTP com fallback interno JMAP)
+        if res is None and client is not None:
+            try:
+                res = async_to_sync(client.send_email)(
+                    notif.recipient_email, subject, html_body=html, plain_body=email_text
+                )
+                notif.driver_used = "stalwart_smtp"
+            except Exception as smtp_exc:
+                if cf_account_id and cf_token:
+                    logger.warning("notify.smtp_failed_trying_cloudflare_fallback", error=str(smtp_exc))
+                    from mail.cloudflare_sending import CloudflareEmailSender
+                    cf_sender = CloudflareEmailSender(account_id=cf_account_id, api_token=cf_token)
+                    res = async_to_sync(cf_sender.send_email)(
+                        from_address=from_email,
+                        from_name=from_name,
+                        to_address=notif.recipient_email,
+                        subject=subject,
+                        html_body=html,
+                        text_body=email_text,
+                    )
+                    notif.driver_used = "cloudflare_email"
+                else:
+                    raise
+
+        # 3. Fallback final direto se client era None mas Cloudflare existia
+        if res is None and cf_account_id and cf_token:
+            from mail.cloudflare_sending import CloudflareEmailSender
+            cf_sender = CloudflareEmailSender(account_id=cf_account_id, api_token=cf_token)
+            res = async_to_sync(cf_sender.send_email)(
+                from_address=from_email,
+                from_name=from_name,
+                to_address=notif.recipient_email,
+                subject=subject,
+                html_body=html,
+                text_body=email_text,
+            )
+            notif.driver_used = "cloudflare_email"
+
         if isinstance(res, dict) and res.get("message_id"):
             email_mid = str(res["message_id"]).strip("<>")
             notif.extra = {**(notif.extra or {}), "email_message_id": email_mid}

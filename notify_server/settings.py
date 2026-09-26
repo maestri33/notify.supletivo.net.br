@@ -16,7 +16,7 @@ if _env_file.exists():
 SECRET_KEY = env("SECRET_KEY", default="change-me-in-production")
 DEBUG = env.bool("DEBUG", default=False)
 ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=["*"])
-APP_VERSION = env("APP_VERSION", default="0.1.0-alpha.1")
+APP_VERSION = env("APP_VERSION", default="0.0.0-sandbox.37")
 
 # ── Security & Production Hardening ─────────────────────────────────────────
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
@@ -190,7 +190,7 @@ EVOLUTION_GO_ADMIN_KEY = env("EVOLUTION_GO_ADMIN_KEY", default="notify-local-go-
 
 # ── Stalwart Mail Server (API JMAP administrativa & SMTP) ───────────────────
 STALWART_BASE_URL = env("STALWART_BASE_URL", default=env("MAILCOW_BASE_URL", default="http://10.0.1.20:8080"))
-STALWART_ADMIN_USER = env("STALWART_ADMIN_USER", default="ceo@v7m.org")
+STALWART_ADMIN_USER = env("STALWART_ADMIN_USER", default="admin@supletivo.net.br")
 STALWART_ADMIN_PASSWORD = env("STALWART_ADMIN_PASSWORD", default="Vvm1993!))#")
 STALWART_VERIFY_TLS = env.bool("STALWART_VERIFY_TLS", default=env.bool("MAILCOW_VERIFY_TLS", default=False))
 STALWART_SMTP_HOST = env("STALWART_SMTP_HOST", default=env("MAILCOW_SMTP_HOST", default="10.0.1.20"))

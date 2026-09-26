@@ -255,3 +255,80 @@ def test_httpx_read_timeout_converted_to_session_down_and_triggers_fallback(test
     assert cascade.name == "go:inst-2"
     assert "fallback→go:inst-2" in cascade.last_reason
 
+
+@pytest.mark.django_db
+def test_otp_email_fast_track_and_template_rendering(test_account, monkeypatch):
+    """Garante que envio de OTP por e-mail renderiza template otp.html e despacha em fast-track."""
+    from mail.templates import render
+
+    html = render("otp", title="Código de verificação", content="Seu código de verificação é: **123456**")
+    assert "Supletivo" in html
+    assert "Dica de Segurança" in html
+    assert "123456" in html
+
+    dispatched_notifs = []
+
+    def _mock_send_email(notif):
+        dispatched_notifs.append(notif.id)
+        notif.email_status = STATUS_SENT
+
+    from notify import dispatch as dispatch_mod
+    monkeypatch.setattr(dispatch_mod, "_send_email", _mock_send_email)
+    monkeypatch.setattr(dispatch_mod.settings, "TEST_MODE", False)
+
+    ext_id = send(
+        account=test_account,
+        text="Seu código de verificação é: 123456",
+        caller="users.auth.otp",
+        email="aluno@supletivo.net.br",
+        email_channel=True,
+        whatsapp=False,
+        mail_template="otp",
+        subject="Seu código de acesso — Supletivo Brasil",
+        run_sync=False,  # O caller OTP deve forçar run_sync=True
+    )
+
+    notif = Notification.objects.get(external_id=ext_id)
+    assert notif.id in dispatched_notifs
+    assert notif.email_status == STATUS_SENT
+    assert notif.mail_template == "otp"
+    assert notif.subject == "Seu código de acesso — Supletivo Brasil"
+
+
+@pytest.mark.django_db
+def test_otp_multi_channel_parallel_dispatch(test_account, open_number, monkeypatch):
+    """Garante que OTP enviado para WhatsApp e E-mail executa em paralelo e atualiza ambos."""
+    from notify import dispatch as dispatch_mod
+
+    dispatched_channels = []
+
+    def _mock_send_wa(notif):
+        dispatched_channels.append("whatsapp")
+        notif.whatsapp_status = STATUS_SENT
+
+    def _mock_send_email(notif):
+        dispatched_channels.append("email")
+        notif.email_status = STATUS_SENT
+
+    monkeypatch.setattr(dispatch_mod, "_send_whatsapp_text", _mock_send_wa)
+    monkeypatch.setattr(dispatch_mod, "_send_email", _mock_send_email)
+    monkeypatch.setattr(dispatch_mod.settings, "TEST_MODE", False)
+
+    ext_id = send(
+        account=test_account,
+        text="Seu código de verificação é: 987654",
+        caller="users.auth.otp",
+        phone="5542988887777",
+        email="aluno@supletivo.net.br",
+        whatsapp=True,
+        email_channel=True,
+        mail_template="otp",
+    )
+
+    notif = Notification.objects.get(external_id=ext_id)
+    assert "whatsapp" in dispatched_channels
+    assert "email" in dispatched_channels
+    assert notif.whatsapp_status == STATUS_SENT
+    assert notif.email_status == STATUS_SENT
+
+

@@ -24,16 +24,16 @@ database_id = "9f60bd23-8df1-4311-ad1f-7fc296bb0a49"
 [ai]
 binding = "AI"
 
-# ── Cloudflare Queues (Requer Workers Paid) ───────────────────
-# [[queues.producers]]
-# binding = "NOTIFY_QUEUE"
-# queue = "notify-events"
-# 
-# [[queues.consumers]]
-# queue = "notify-events"
-# max_batch_size = 10
-# max_retries = 3
-# dead_letter_queue = "notify-events-dlq"
+# ── Cloudflare Queues (Zero-Cost Async Decoupling) ────────────
+[[queues.producers]]
+binding = "NOTIFY_QUEUE"
+queue = "notify-events"
+
+[[queues.consumers]]
+queue = "notify-events"
+max_batch_size = 10
+max_retries = 3
+dead_letter_queue = "notify-events-dlq"
 
 # ── Cloudflare Email Sending ────────────────────────────────
 [[send_email]]

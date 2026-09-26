@@ -231,32 +231,56 @@ export async function handleIncomingEmail(
     }
   }
 
-  // 7. Enfileirar evento para o Backend / WhatsApp Notifier (caso configurado)
+  // 7. Enfileirar ou Despachar evento para o Backend / WhatsApp Notifier
+  const isHighPriority = analysis.intent === 'envio_documentos' || analysis.intent === 'comprovante_pagamento';
+  const inboundPayload = {
+    notification_id: emailId,
+    account_slug: accountSlug,
+    channel: 'email_inbound',
+    recipient: toAddress,
+    subject,
+    payload: {
+      from_address: fromAddress,
+      from_name: fromName,
+      intent: analysis.intent,
+      priority: isHighPriority ? 'high' : 'normal',
+      summary: analysis.summary,
+      extracted_entities: analysis.extracted_entities,
+      attachments: attachmentsMeta,
+      whatsapp_alert: isHighPriority ? {
+        text: `🚨 *Novo Email Prioritário Recebido*\n*De:* ${fromName || fromAddress}\n*Intenção:* ${analysis.intent}\n*Resumo:* ${analysis.summary}\n*CPF:* ${analysis.extracted_entities.cpf || 'Não informado'}`,
+      } : undefined,
+    },
+    timestamp: new Date().toISOString(),
+  };
+
   if (env.NOTIFY_QUEUE) {
     try {
-      const isHighPriority = analysis.intent === 'envio_documentos' || analysis.intent === 'comprovante_pagamento';
-      await env.NOTIFY_QUEUE.send({
-        notification_id: emailId,
-        account_slug: accountSlug,
-        channel: 'email_inbound',
-        recipient: toAddress,
-        subject,
-        payload: {
-          from_address: fromAddress,
-          from_name: fromName,
-          intent: analysis.intent,
-          priority: isHighPriority ? 'high' : 'normal',
-          summary: analysis.summary,
-          extracted_entities: analysis.extracted_entities,
-          attachments: attachmentsMeta,
-          whatsapp_alert: isHighPriority ? {
-            text: `🚨 *Novo Email Prioritário Recebido*\n*De:* ${fromName || fromAddress}\n*Intenção:* ${analysis.intent}\n*Resumo:* ${analysis.summary}\n*CPF:* ${analysis.extracted_entities.cpf || 'Não informado'}`,
-          } : undefined,
-        },
-        timestamp: new Date().toISOString(),
-      });
+      await env.NOTIFY_QUEUE.send(inboundPayload);
     } catch (queueErr) {
       console.error('Erro ao enfileirar evento de inbound email:', queueErr);
+    }
+  } else if (env.BACKEND_ORIGIN) {
+    // Fallback: despacho HTTP direto se filas Cloudflare Queues não estiverem ativas
+    try {
+      const backendUrl = `${env.BACKEND_ORIGIN.replace(/\/$/, '')}/v1/email/inbound`;
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'X-Notification-ID': emailId,
+        'X-Account-Slug': accountSlug,
+      };
+      if (env.BACKEND_SERVICE_TOKEN) {
+        headers['CF-Access-Client-Secret'] = env.BACKEND_SERVICE_TOKEN;
+      }
+      ctx.waitUntil(
+        fetch(backendUrl, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(inboundPayload),
+        }).catch((err) => console.error('Erro no despacho direto de email inbound:', err))
+      );
+    } catch (httpErr) {
+      console.error('Erro ao acionar webhook HTTP de inbound email:', httpErr);
     }
   }
 }
