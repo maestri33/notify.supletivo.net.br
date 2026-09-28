@@ -19,7 +19,7 @@ describe('Cloudflare Workers Paid Features on notify-edge', () => {
 
     const res = await app.request('/reports/delivery-summary?account=polo-sp&hours=24', {}, env);
     expect(res.status).toBe(200);
-    const json = await res.json();
+    const json = (await res.json()) as any;
     expect(json.account).toBe('polo-sp');
     expect(json.period_hours).toBe(24);
     expect(json.metrics).toHaveLength(2);
