@@ -17,23 +17,40 @@ binding = "DB"
 database_name = "notify-db"
 database_id = "9f60bd23-8df1-4311-ad1f-7fc296bb0a49"
 
-# [[r2_buckets]]
-# binding = "MEDIA"
-# bucket_name = "notify-media"
+[[r2_buckets]]
+binding = "MEDIA"
+bucket_name = "notify-media"
 
 [ai]
 binding = "AI"
 
-# ── Cloudflare Queues (Zero-Cost Async Decoupling) ────────────
+# ── Cloudflare Queues (Zero-Cost Async Decoupling - Workers Paid) ────────────
 [[queues.producers]]
 binding = "NOTIFY_QUEUE"
 queue = "notify-events"
 
 [[queues.consumers]]
 queue = "notify-events"
-max_batch_size = 10
-max_retries = 3
+max_batch_size = 50
+max_batch_timeout = 5
+max_retries = 4
+retry_delay = 15
+max_concurrency = 5
 dead_letter_queue = "notify-events-dlq"
+
+[[queues.consumers]]
+queue = "notify-events-dlq"
+max_batch_size = 10
+max_concurrency = 2
+
+# ── Cron Triggers (Ilimitados no Workers Paid) ───────────────────
+[triggers]
+crons = ["*/15 * * * *"]
+
+# ── Observabilidade e Tracing (Workers Paid) ────────────────────
+[observability]
+enabled = true
+head_sampling_rate = 1.0
 
 # ── Cloudflare Email Sending ────────────────────────────────
 [[send_email]]

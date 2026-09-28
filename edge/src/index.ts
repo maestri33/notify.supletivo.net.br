@@ -463,16 +463,57 @@ app.post('/mcp', async (c) => {
   });
 });
 
-// ── 5. Cloudflare Queue Consumer Handler ───────────────────────────────────
+// ── 5. Delivery Summary Report Endpoint (Workers Paid CPU & D1) ───────────
+app.get('/reports/delivery-summary', async (c) => {
+  if (!c.env.DB) {
+    return c.json({ error: 'Database not available' }, 503);
+  }
+  const accountSlug = c.req.query('account') || 'default';
+  const hours = Number(c.req.query('hours') || 24);
+
+  const query = `
+    SELECT channel, status, COUNT(*) as count 
+    FROM notifications 
+    WHERE account_slug = ? AND created_at >= datetime('now', '-' || ? || ' hours')
+    GROUP BY channel, status
+  `;
+  const result = await c.env.DB.prepare(query).bind(accountSlug, hours).all();
+  return c.json({ account: accountSlug, period_hours: hours, metrics: result.results || [] });
+});
+
+// ── 6. Cloudflare Queue Consumer Handler (Workers Paid Enhanced) ───────────
 export const queueHandler = async (
   batch: MessageBatch<NotifyQueueMessage>,
   env: Env,
   ctx: ExecutionContext
 ): Promise<void> => {
+  // 1. Processamento específico da Dead Letter Queue (DLQ)
+  if (batch.queue === 'notify-events-dlq') {
+    const deadStatements: D1PreparedStatement[] = [];
+    for (const msg of batch.messages) {
+      console.error(`[DLQ ALERT] Mensagem falhou definitivamente: ${msg.body.notification_id}`, msg.body);
+      if (env.DB) {
+        deadStatements.push(
+          env.DB.prepare("UPDATE notifications SET status = 'dead_letter' WHERE id = ?")
+            .bind(msg.body.notification_id)
+        );
+      }
+      msg.ack(); // Confirma na DLQ para não reter indefinidamente após auditoria
+    }
+    if (deadStatements.length > 0 && env.DB) {
+      ctx.waitUntil(env.DB.batch(deadStatements));
+    }
+    return;
+  }
+
+  // 2. Processamento da fila notify-events
   if (!env.BACKEND_ORIGIN) {
     batch.ackAll();
     return;
   }
+
+  const successIds: string[] = [];
+  const failedIds: string[] = [];
 
   await Promise.allSettled(
     batch.messages.map(async (message) => {
@@ -512,32 +553,52 @@ export const queueHandler = async (
 
         if (resp.ok) {
           message.ack();
-          if (env.DB) {
-            ctx.waitUntil(
-              env.DB.prepare("UPDATE notifications SET status = 'dispatched' WHERE id = ?")
-                .bind(item.notification_id)
-                .run()
-            );
-          }
+          successIds.push(item.notification_id);
         } else if (resp.status === 429 || resp.status === 408 || resp.status >= 500) {
           // Rate limiting (429), timeout (408) ou falha de servidor (5xx): reagenda na fila
           message.retry();
         } else {
           // Erro 4xx de cliente/validação (400, 404, 422): ack para não reter na fila
           message.ack();
-          if (env.DB) {
-            ctx.waitUntil(
-              env.DB.prepare("UPDATE notifications SET status = 'failed' WHERE id = ?")
-                .bind(item.notification_id)
-                .run()
-            );
-          }
+          failedIds.push(item.notification_id);
         }
       } catch (err) {
         // Erro de rede ou timeout: reagenda
         message.retry();
       }
     })
+  );
+
+  // 3. Batch D1 updates (Workers Paid otimizado)
+  if (env.DB && (successIds.length > 0 || failedIds.length > 0)) {
+    const batchUpdates: D1PreparedStatement[] = [
+      ...successIds.map((id) => env.DB.prepare("UPDATE notifications SET status = 'dispatched' WHERE id = ?").bind(id)),
+      ...failedIds.map((id) => env.DB.prepare("UPDATE notifications SET status = 'failed' WHERE id = ?").bind(id)),
+    ];
+    ctx.waitUntil(env.DB.batch(batchUpdates));
+  }
+};
+
+// ── 7. Scheduled Cron Handler (Idempotency Cleanup & Reconciliation) ───────
+export const scheduledHandler = async (
+  event: ScheduledEvent,
+  env: Env,
+  ctx: ExecutionContext
+): Promise<void> => {
+  if (!env.DB) return;
+
+  ctx.waitUntil(
+    (async () => {
+      // 1. Limpar idempotências expiradas (ex: OTPs com TTL 60s)
+      await env.DB.prepare(
+        "DELETE FROM idempotency_keys WHERE expires_at IS NOT NULL AND expires_at < CURRENT_TIMESTAMP"
+      ).run();
+
+      // 2. Limpar notificações com mais de 60 dias
+      await env.DB.prepare(
+        "DELETE FROM notifications WHERE created_at < datetime('now', '-60 days')"
+      ).run();
+    })()
   );
 };
 
@@ -547,4 +608,5 @@ export default {
   fetch: app.fetch,
   queue: queueHandler,
   email: handleIncomingEmail,
+  scheduled: scheduledHandler,
 };

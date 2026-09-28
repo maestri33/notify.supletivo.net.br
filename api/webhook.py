@@ -195,6 +195,11 @@ def _store_inbound(number, instance_name: str, data: dict) -> str:
         return "own_message"
 
     msg_id = message_id_of(data) or f"no-id-{timezone.now().timestamp()}"
+    preview_text = preview_of(data)
+
+    from ai.typesafe import triage_inbound_message
+    triage = triage_inbound_message(preview_text)
+
     event, created = InboundEvent.objects.get_or_create(
         wa_message_id=msg_id,
         defaults={
@@ -202,7 +207,15 @@ def _store_inbound(number, instance_name: str, data: dict) -> str:
             "instance_name": instance_name,
             "payload": data,
             "from_number": from_number,
-            "preview": preview_of(data),
+            "preview": preview_text,
+            "department": triage.department,
+            "department_confidence": triage.confidence,
+            "legal_risk": triage.legal_risk,
+            "legal_risk_prob": triage.legal_risk_prob,
+            "urgency_score": triage.urgency_score,
+            "urgency_level": triage.urgency_level,
+            "triage_source": triage.triage_source,
+            "triage_latency_ms": triage.latency_ms,
         },
     )
     if not created:

@@ -217,6 +217,16 @@ class InboundEvent(ExternalIdModel):
     forwarded = models.BooleanField(default=False)
     received_at = models.DateTimeField(auto_now_add=True)
 
+    # Triagem cognitiva via Jev (TypeSafe System One)
+    department = models.CharField(max_length=32, blank=True, default="", db_index=True)
+    department_confidence = models.FloatField(null=True, blank=True)
+    legal_risk = models.BooleanField(default=False, db_index=True)
+    legal_risk_prob = models.FloatField(null=True, blank=True)
+    urgency_score = models.FloatField(default=1.0)
+    urgency_level = models.CharField(max_length=16, blank=True, default="normal")
+    triage_source = models.CharField(max_length=16, blank=True, default="none")
+    triage_latency_ms = models.IntegerField(null=True, blank=True)
+
     def __str__(self):
         return f"Inbound({self.instance_name}/{self.wa_message_id})"
 

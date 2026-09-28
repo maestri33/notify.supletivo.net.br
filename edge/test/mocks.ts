@@ -14,6 +14,9 @@ export function createMockD1(): MockD1 {
   const state = { shouldFail: false };
 
   const db = {
+    batch: async (statements: any[]) => {
+      return Promise.all(statements.map((s) => s.run()));
+    },
     prepare: (sql: string) => {
       let boundArgs: any[] = [];
       const statement = {
