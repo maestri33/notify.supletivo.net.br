@@ -16,7 +16,7 @@ if _env_file.exists():
 SECRET_KEY = env("SECRET_KEY", default="change-me-in-production")
 DEBUG = env.bool("DEBUG", default=False)
 ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=["*"])
-APP_VERSION = env("APP_VERSION", default="0.0.0-sandbox.45")
+APP_VERSION = env("APP_VERSION", default="0.0.0-sandbox.50")
 
 # ── Security & Production Hardening ─────────────────────────────────────────
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")

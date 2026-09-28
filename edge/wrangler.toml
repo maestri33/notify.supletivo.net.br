@@ -17,9 +17,9 @@ binding = "DB"
 database_name = "notify-db"
 database_id = "9f60bd23-8df1-4311-ad1f-7fc296bb0a49"
 
-[[r2_buckets]]
-binding = "MEDIA"
-bucket_name = "notify-media"
+# [[r2_buckets]]
+# binding = "MEDIA"
+# bucket_name = "notify-media"
 
 [ai]
 binding = "AI"
