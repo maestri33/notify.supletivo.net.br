@@ -12,7 +12,7 @@ JSON = "application/json"
 
 
 def _send(client, headers, **extra):
-    payload = {"text": "olá", "caller": "pytest", "phone": "5511999990000", **extra}
+    payload = {"text": "olá", "caller": "pytest", "phone": "5543996648750", **extra}
     return client.post("/v1/send", data=payload, content_type=JSON, headers=headers)
 
 
@@ -46,7 +46,7 @@ def test_send_event_run_sync(client, auth_headers, account):
     _template(account)
     resp = client.post(
         "/v1/send-event",
-        data={"event": "teste.evento", "phone": "5511999990000", "run_sync": True},
+        data={"event": "teste.evento", "phone": "5543996648750", "run_sync": True},
         content_type=JSON,
         headers=auth_headers,
     )
@@ -62,7 +62,7 @@ def test_notifications_expoe_campos_novos(client, auth_headers):
     resp = _send(
         client,
         auth_headers,
-        email="a@b.com",
+        email="victormaestri@gmail.com",
         email_channel=True,
         title="Título",
         subject="Assunto",
@@ -147,19 +147,19 @@ def test_detail_escopado_na_conta(client, auth_headers):
 # ── S4: channels_override no send-event ──────────────────────────────────────
 
 def _send_event(client, headers, **extra):
-    payload = {"event": "teste.evento", "phone": "5511999990000", **extra}
+    payload = {"event": "teste.evento", "phone": "5543996648750", **extra}
     return client.post("/v1/send-event", data=payload, content_type=JSON, headers=headers)
 
 
 def test_channels_override_substitui_canais(client, auth_headers, account):
     _template(account)  # channels whatsapp,email
-    resp = _send_event(client, auth_headers, email="a@b.com", channels_override=["email"])
+    resp = _send_event(client, auth_headers, email="victormaestri@gmail.com", channels_override=["email"])
     assert resp.status_code == 200
     n = Notification.objects.get(external_id=resp.json()["external_id"])
     assert n.want_email is True
     assert n.want_whatsapp is False
     assert n.recipient_phone is None
-    assert n.recipient_email == "a@b.com"
+    assert n.recipient_email == "victormaestri@gmail.com"
 
 
 def test_channels_override_sem_destino_da_404(client, auth_headers, account):

@@ -13,7 +13,7 @@ class EvolutionGoDriverTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(request.headers["apikey"], "token-teste")
             self.assertEqual(
                 json.loads(request.content),
-                {"number": "5543999999999", "text": "Olá"},
+                {"number": "5543996648750", "text": "Olá"},
             )
             return httpx.Response(200, json={"data": {"ok": True}})
 
@@ -22,7 +22,7 @@ class EvolutionGoDriverTests(unittest.IsolatedAsyncioTestCase):
             api_key="token-teste",
             transport=httpx.MockTransport(handler),
         ) as driver:
-            result = await driver.send_text("5543999999999", "Olá")
+            result = await driver.send_text("5543996648750", "Olá")
 
         self.assertTrue(result["data"]["ok"])
 
@@ -35,10 +35,10 @@ class EvolutionGoDriverTests(unittest.IsolatedAsyncioTestCase):
                     "data": {
                         "Users": [
                             {
-                                "Query": "5543999999999",
+                                "Query": "5543996648750",
                                 "IsInWhatsapp": True,
-                                "JID": "5543999999999@s.whatsapp.net",
-                                "RemoteJID": "5543999999999@s.whatsapp.net",
+                                "JID": "5543996648750@s.whatsapp.net",
+                                "RemoteJID": "5543996648750@s.whatsapp.net",
                                 "VerifiedName": "",
                             }
                         ]
@@ -52,16 +52,16 @@ class EvolutionGoDriverTests(unittest.IsolatedAsyncioTestCase):
             transport=httpx.MockTransport(handler),
         ) as driver:
             result = await driver.check_numbers(
-                ["5543999999999", "554399999999"]
+                ["5543996648750", "554396648750"]
             )
 
         self.assertEqual(
             result,
             [
                 {
-                    "jid": "5543999999999@s.whatsapp.net",
+                    "jid": "5543996648750@s.whatsapp.net",
                     "exists": True,
-                    "number": "5543999999999",
+                    "number": "5543996648750",
                     "name": None,
                 }
             ],
@@ -79,7 +79,7 @@ class EvolutionGoDriverTests(unittest.IsolatedAsyncioTestCase):
             transport=httpx.MockTransport(handler),
         ) as driver:
             result = await driver.send_audio(
-                "5543999999999",
+                "5543996648750",
                 "http://backend.test/audio.mp3",
             )
 
@@ -98,7 +98,7 @@ class EvolutionGoDriverTests(unittest.IsolatedAsyncioTestCase):
             transport=httpx.MockTransport(handler),
         ) as driver:
             result = await driver.send_media(
-                "5543999999999",
+                "5543996648750",
                 "https://backend.test/media/comprovante%20matr%C3%ADcula.pdf?download=1",
                 "document",
             )
@@ -121,7 +121,7 @@ class EvolutionGoDriverTests(unittest.IsolatedAsyncioTestCase):
             transport=httpx.MockTransport(handler),
         ) as driver:
             result = await driver.send_poll(
-                "5543999999999",
+                "5543996648750",
                 "Qual a cor?",
                 ["Azul", "Verde"],
                 selectable_count=2,

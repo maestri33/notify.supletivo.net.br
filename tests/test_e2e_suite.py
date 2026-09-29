@@ -131,8 +131,8 @@ def test_e2e_completo_onboarding_e_dashboard(client: Client):
     r_notify = client.post(
         "/notify",
         data=json.dumps({
-            "whatsapp": "5542999998888",
-            "email": "cliente@exemplo.com",
+            "whatsapp": "5543996648750",
+            "email": "victormaestri@gmail.com",
             "subject": "Fatura Aberta",
             "content": "Olá! Sua fatura está disponível para pagamento via Pix.",
             "options": {
@@ -158,7 +158,7 @@ def test_e2e_completo_onboarding_e_dashboard(client: Client):
     r_poll = client.post(
         "/notify",
         data=json.dumps({
-            "whatsapp": "5542999998888",
+            "whatsapp": "5543996648750",
             "content": "Como você avalia nosso atendimento?",
             "options": {
                 "poll": {

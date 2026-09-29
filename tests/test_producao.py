@@ -23,7 +23,7 @@ def _real(monkeypatch):
     monkeypatch.setattr(ai_adapt, "enabled_for", lambda a: False)
 
 
-def _email_notif(account, to="morto@example.com"):
+def _email_notif(account, to="victormaestri@gmail.com"):
     return Notification.objects.create(
         account=account, caller="t", recipient_email=to, text="oi",
         want_whatsapp=False, want_email=True,
@@ -34,7 +34,7 @@ def _email_notif(account, to="morto@example.com"):
 def test_bounce_vira_supressao_e_nao_insiste(account, _real, monkeypatch):
     class _C:
         async def send_email(self, *a, **kw):
-            raise MailError("destinatário recusado", recipients_refused={"morto@example.com": (550, b"no user")})
+            raise MailError("destinatário recusado", recipients_refused={"victormaestri@gmail.com": (550, b"no user")})
 
     monkeypatch.setattr(dispatch_mod, "_get_mail_client", lambda n: _C())
 
@@ -42,7 +42,7 @@ def test_bounce_vira_supressao_e_nao_insiste(account, _real, monkeypatch):
     dispatch_mod.dispatch(n1.id)
     n1.refresh_from_db()
     assert n1.email_status == "failed"
-    assert SuppressedEmail.objects.filter(account=account, email="morto@example.com").exists()
+    assert SuppressedEmail.objects.filter(account=account, email="victormaestri@gmail.com").exists()
 
     # segundo envio pro mesmo destino: nem tenta — skipped com motivo
     chamado = []
@@ -77,7 +77,7 @@ def test_purge_respeita_retencao(account):
 
 def test_requeue_volta_canal_failed_pra_fila(client, account):
     n = Notification.objects.create(
-        account=account, caller="t", recipient_phone="5542999990000", text="oi",
+        account=account, caller="t", recipient_phone="5543996648750", text="oi",
         want_whatsapp=True, want_email=False,
         whatsapp_status="failed", email_status="skipped",
     )

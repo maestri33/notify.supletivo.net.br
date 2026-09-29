@@ -18,6 +18,7 @@ _SLUG_ALIASES = {
     "parabens": "supletivo",
     "receipt": "supletivo",
     "welcome": "supletivo",
+    "institucional": "institucional.html",
 }
 
 MEDIA_TYPES = {"image", "video", "audio", "document"}
@@ -168,7 +169,8 @@ def media_html(media_url: str, media_type: str, caption: str = "") -> str:
 
 @lru_cache(maxsize=32)
 def _load(slug: str) -> str:
-    return (_TEMPLATES_DIR / f"{slug}.html").read_text(encoding="utf-8")
+    clean_slug = slug.removesuffix(".html")
+    return (_TEMPLATES_DIR / f"{clean_slug}.html").read_text(encoding="utf-8")
 
 
 def render(

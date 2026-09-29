@@ -65,7 +65,7 @@ def test_otp_forces_sync_and_bypasses_django_q(test_account, open_number, monkey
         account=test_account,
         text="Seu código OTP é 123456",
         caller="users.auth.otp",
-        phone="5542988887777",
+        phone="5543996648750",
         run_sync=False,  # O caller OTP deve sobrepor e forçar True
     )
 
@@ -88,7 +88,7 @@ def test_otp_bypasses_ai_adapt_and_cadence_limit(test_account, open_number, monk
     notif = Notification.objects.create(
         account=test_account,
         caller="users.auth.otp",
-        recipient_phone="5542988887777",
+        recipient_phone="5543996648750",
         text="Código: 654321",
         want_whatsapp=True,
         whatsapp_status="pending",
@@ -131,7 +131,7 @@ def test_otp_pool_immediate_fallback_on_socket_or_timeout(test_account, open_num
     ]
     fast_cascade = CascadeDriver(builders, immediate_fallback=True)
 
-    result = asyncio.run(fast_cascade.send_text("5542988887777", "Código: 999888"))
+    result = asyncio.run(fast_cascade.send_text("5543996648750", "Código: 999888"))
     assert result == {"id": "msg-fallback-456"}
     assert fast_cascade.name == "evolution-go:otp-inst-2"
     assert "fallback→evolution-go:otp-inst-2" in fast_cascade.last_reason
@@ -156,7 +156,7 @@ def test_backend_idempotency_otp_cooldown_60s(test_account, open_number, monkeyp
         account=test_account,
         text="Seu código é 111222",
         caller="users.auth.otp",
-        phone="5542988887777",
+        phone="5543996648750",
         idempotency_key=idem_key,
     )
 
@@ -165,7 +165,7 @@ def test_backend_idempotency_otp_cooldown_60s(test_account, open_number, monkeyp
         account=test_account,
         text="Seu código é 111222",
         caller="users.auth.otp",
-        phone="5542988887777",
+        phone="5543996648750",
         idempotency_key=idem_key,
     )
     assert ext_1 == ext_2
@@ -180,7 +180,7 @@ def test_backend_idempotency_otp_cooldown_60s(test_account, open_number, monkeyp
         account=test_account,
         text="Seu novo código é 333444",
         caller="users.auth.otp",
-        phone="5542988887777",
+        phone="5543996648750",
         idempotency_key=idem_key,
     )
     assert ext_3 != ext_1
@@ -201,7 +201,7 @@ def test_api_notify_fast_track_options(client, test_account, open_number, monkey
 
     payload = {
         "content": "Código de login: 778899",
-        "whatsapp": "5542988887777",
+        "whatsapp": "5543996648750",
         "account_id": test_account.slug,
         "options": {
             "caller": "users.auth.otp",
@@ -250,7 +250,7 @@ def test_httpx_read_timeout_converted_to_session_down_and_triggers_fallback(test
 
     driver_1.send_text = _failing_send_text
 
-    res = asyncio.run(cascade.send_text("5542999990000", "OTP Code"))
+    res = asyncio.run(cascade.send_text("5543996648750", "OTP Code"))
     assert res == {"id": "msg-recovered-after-timeout"}
     assert cascade.name == "go:inst-2"
     assert "fallback→go:inst-2" in cascade.last_reason
@@ -318,7 +318,7 @@ def test_otp_multi_channel_parallel_dispatch(test_account, open_number, monkeypa
         account=test_account,
         text="Seu código de verificação é: 987654",
         caller="users.auth.otp",
-        phone="5542988887777",
+        phone="5543996648750",
         email="aluno@supletivo.net.br",
         whatsapp=True,
         email_channel=True,

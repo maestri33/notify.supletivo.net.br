@@ -9,7 +9,7 @@ from django.test import override_settings
 from mail.stalwart import StalwartClient, StalwartError, StalwartNotConfigured, generate_password
 
 
-def _mock_client(handler, base_url="http://stalwart.test", user="admin@test", password="pwd") -> StalwartClient:
+def _mock_client(handler, base_url="http://stalwart.test", user="admin@supletivo.net.br", password="pwd") -> StalwartClient:
     c = StalwartClient(base_url=base_url, user=user, password=password)
     c._client = httpx.Client(
         base_url=base_url,
@@ -36,11 +36,11 @@ def test_generate_password_length_and_chars():
 def test_get_session_success():
     def handler(request: httpx.Request):
         assert request.url.path == "/jmap/session"
-        return httpx.Response(200, json={"username": "admin@test", "accounts": {"b": {}}})
+        return httpx.Response(200, json={"username": "admin@supletivo.net.br", "accounts": {"b": {}}})
 
     with _mock_client(handler) as c:
         sess = c.get_session()
-        assert sess["username"] == "admin@test"
+        assert sess["username"] == "admin@supletivo.net.br"
 
 
 def test_get_session_unauthorized():

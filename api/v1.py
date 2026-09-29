@@ -21,8 +21,8 @@ PhoneStr = Annotated[
     str,
     Field(
         pattern=r"^\d{10,15}$",
-        description="Telefone no padrão E.164 apenas com dígitos (sem '+'), ex.: 5542999999999",
-        examples=["5542999999999"],
+        description="Telefone no padrão E.164 apenas com dígitos (sem '+'), ex.: 5543996648750",
+        examples=["5543996648750"],
     ),
 ]
 GenderType = Literal["M", "F"]

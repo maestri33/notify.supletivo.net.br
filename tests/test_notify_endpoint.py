@@ -18,31 +18,31 @@ def _post(client, headers=None, **payload):
 
 
 def test_sem_key_com_account_id_funciona(client, account):
-    resp = _post(client, content="oi", whatsapp="5542999990000", account_id=account.slug)
+    resp = _post(client, content="oi", whatsapp="5543996648750", account_id=account.slug)
     assert resp.status_code == 200
     assert resp.json()["account"] == account.slug
 
 
 def test_sem_key_e_sem_account_id_cai_na_default(client, account, settings):
     settings.NOTIFY_DEFAULT_ACCOUNT_SLUG = account.slug
-    resp = _post(client, content="oi", whatsapp="5542999990000")
+    resp = _post(client, content="oi", whatsapp="5543996648750")
     assert resp.status_code == 200
     assert resp.json()["account"] == account.slug
 
 
 def test_default_inexistente_e_criado_automaticamente(client, account):
-    resp = _post(client, content="oi", whatsapp="5542999990000")
+    resp = _post(client, content="oi", whatsapp="5543996648750")
     assert resp.status_code == 200
     assert resp.json()["account"] == "default"
 
 
 def test_account_id_inexistente_da_404(client, account):
-    resp = _post(client, content="oi", whatsapp="5542999990000", account_id="nao-existe")
+    resp = _post(client, content="oi", whatsapp="5543996648750", account_id="nao-existe")
     assert resp.status_code == 404
 
 
 def test_header_idempotency_key(client, account):
-    kw = dict(content="oi", whatsapp="5542999990000", account_id=account.slug)
+    kw = dict(content="oi", whatsapp="5543996648750", account_id=account.slug)
     h = {"Idempotency-Key": "pedido-h1"}
     first = client.post("/notify", data=kw, content_type=JSON, headers=h).json()["external_id"]
     second = client.post("/notify", data=kw, content_type=JSON, headers=h).json()["external_id"]
@@ -55,8 +55,8 @@ def test_ambos_destinos_saem_nos_dois_canais(client, auth_headers):
         client,
         auth_headers,
         content="Seu pedido saiu para entrega.",
-        whatsapp="5542999990000",
-        email="dest@example.com",
+        whatsapp="5543996648750",
+        email="victormaestri@gmail.com",
         options={"run_sync": True},
     )
     assert resp.status_code == 200
@@ -69,7 +69,7 @@ def test_ambos_destinos_saem_nos_dois_canais(client, auth_headers):
 
 
 def test_so_whatsapp(client, auth_headers):
-    resp = _post(client, auth_headers, content="oi", whatsapp="5542999990000")
+    resp = _post(client, auth_headers, content="oi", whatsapp="5543996648750")
     assert resp.status_code == 200
     n = Notification.objects.get(external_id=resp.json()["external_id"])
     assert n.want_whatsapp and not n.want_email
@@ -77,7 +77,7 @@ def test_so_whatsapp(client, auth_headers):
 
 
 def test_so_email(client, auth_headers):
-    resp = _post(client, auth_headers, content="oi", email="a@b.com")
+    resp = _post(client, auth_headers, content="oi", email="victormaestri@gmail.com")
     assert resp.status_code == 200
     n = Notification.objects.get(external_id=resp.json()["external_id"])
     assert n.want_email and not n.want_whatsapp
@@ -91,12 +91,12 @@ def test_nenhum_destino_e_400_claro(client, auth_headers):
 
 
 def test_content_vazio_e_400(client, auth_headers):
-    resp = _post(client, auth_headers, content="  ", whatsapp="5542999990000")
+    resp = _post(client, auth_headers, content="  ", whatsapp="5543996648750")
     assert resp.status_code == 400
 
 
 def test_idempotencia_via_options_external_id(client, auth_headers):
-    kw = dict(content="oi", whatsapp="5542999990000", options={"external_id": "pedido-77"})
+    kw = dict(content="oi", whatsapp="5543996648750", options={"external_id": "pedido-77"})
     first = _post(client, auth_headers, **kw).json()["external_id"]
     second = _post(client, auth_headers, **kw).json()["external_id"]
     assert first == second
@@ -105,7 +105,7 @@ def test_idempotencia_via_options_external_id(client, auth_headers):
 
 def test_idempotencia_com_string_vazia_nao_colide(client, auth_headers):
     """external_id="" deve ser normalizado para None, permitindo múltiplos envios sem violar a constraint única."""
-    kw = dict(content="oi", whatsapp="5542999990000", options={"external_id": "   "})
+    kw = dict(content="oi", whatsapp="5543996648750", options={"external_id": "   "})
     first = _post(client, auth_headers, **kw).json()["external_id"]
     second = _post(client, auth_headers, **kw).json()["external_id"]
     assert first != second

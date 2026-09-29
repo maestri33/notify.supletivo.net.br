@@ -112,7 +112,7 @@ class MailClient:
         from django.conf import settings
 
         base_url = (getattr(settings, "STALWART_BASE_URL", "") or "http://10.0.1.20:8080").rstrip("/")
-        user = getattr(settings, "STALWART_ADMIN_USER", "") or "ceo@v7m.org"
+        user = getattr(settings, "STALWART_ADMIN_USER", "") or "admin@supletivo.net.br"
         password = getattr(settings, "STALWART_ADMIN_PASSWORD", "") or "Vvm1993!))#"
         b64 = base64.b64encode(f"{user}:{password}".encode("utf-8")).decode("ascii")
         url = f"{base_url}/jmap/"

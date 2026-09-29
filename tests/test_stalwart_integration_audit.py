@@ -9,7 +9,7 @@ from django.test import override_settings
 from mail.stalwart import StalwartClient, StalwartError, generate_password
 
 
-def _mock_stalwart_client(handler, base_url="http://10.0.1.20:8080", user="ceo@v7m.org", password="sec") -> StalwartClient:
+def _mock_stalwart_client(handler, base_url="http://10.0.1.20:8080", user="admin@supletivo.net.br", password="sec") -> StalwartClient:
     client = StalwartClient(base_url=base_url, user=user, password=password, timeout=5.0)
     client._client = httpx.Client(
         base_url=base_url,

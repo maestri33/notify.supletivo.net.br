@@ -44,7 +44,7 @@ def seed_dashboard_data(db):
         slug="principal",
         defaults={
             "instance_name": "default",
-            "phone_number": "5542999990000",
+            "phone_number": "5543996648750",
             "connection_status": "open",
             "is_default": True,
         },
@@ -64,7 +64,7 @@ def seed_dashboard_data(db):
     Notification.objects.create(
         account=acc,
         caller="playwright-test",
-        recipient_phone="5542999991111",
+        recipient_phone="5543996648750",
         text="Notificação de Teste Alfa",
         whatsapp_status="sent",
         want_whatsapp=True,
@@ -72,7 +72,7 @@ def seed_dashboard_data(db):
     Notification.objects.create(
         account=acc,
         caller="playwright-test",
-        recipient_phone="5542999992222",
+        recipient_phone="5543996648750",
         text="Aviso de Teste Beta",
         whatsapp_status="failed",
         whatsapp_error="Timeout de rede",
@@ -81,7 +81,7 @@ def seed_dashboard_data(db):
     # Seed inbound message
     InboundEvent.objects.create(
         account=acc,
-        from_number="5542999993333",
+        from_number="5543996648750",
         instance_name="default",
         preview="Olá, gostaria de saber mais sobre o pedido #12345",
         wa_message_id="wa-playwright-inbound-1",

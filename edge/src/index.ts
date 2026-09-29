@@ -85,6 +85,7 @@ app.get('/media/*', async (c) => {
     return c.text('Key required', 400);
   }
 
+  if (!c.env.MEDIA) return c.json({ error: 'R2 media bucket not bound' }, 503);
   const object = await c.env.MEDIA.get(key);
   if (!object) {
     return c.text('Object Not Found', 404);

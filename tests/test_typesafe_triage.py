@@ -50,7 +50,7 @@ def numero_teste(account):
         account=account,
         instance_name="inst_triagem",
         slug="triagem",
-        phone_number="5542988881234",
+        phone_number="5543996648750",
         driver=DRIVER_GO,
         is_default=True,
     )
@@ -64,7 +64,7 @@ def test_webhook_persists_typesafe_triage(client, account, numero_teste):
         "data": {
             "Info": {
                 "ID": "JEV_MSG_001",
-                "Chat": "5542988889999@s.whatsapp.net",
+                "Chat": "5543996648750@s.whatsapp.net",
                 "IsFromMe": False,
                 "PushName": "Aluno Teste",
             },

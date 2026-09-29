@@ -26,13 +26,13 @@ async def test_cloudflare_email_sender_success():
         result = await sender.send_email(
             from_address="contato@supletivo.net.br",
             from_name="Supletivo Brasil",
-            to_address="aluno@exemplo.com",
+            to_address="victormaestri@gmail.com",
             subject="Bem-vindo ao Supletivo",
             html_body="<p>Seu acesso foi liberado!</p>",
             text_body="Seu acesso foi liberado!",
         )
 
-        assert result["to"] == "aluno@exemplo.com"
+        assert result["to"] == "victormaestri@gmail.com"
         assert result["message_id"] == "msg-cf-123456"
         assert result["provider"] == "cloudflare"
         assert mock_post.called
@@ -57,7 +57,7 @@ async def test_cloudflare_email_sender_error():
             await sender.send_email(
                 from_address="invalido@dominio.com",
                 from_name="Supletivo Brasil",
-                to_address="aluno@exemplo.com",
+                to_address="victormaestri@gmail.com",
                 subject="Erro teste",
                 html_body="<p>Teste</p>",
             )
