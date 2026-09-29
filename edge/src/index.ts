@@ -18,6 +18,7 @@ export type Env = {
   DB: D1Database;
   MEDIA: R2Bucket;
   AI: any;
+  HYPERDRIVE?: any;
   NOTIFY_QUEUE?: Queue<NotifyQueueMessage>;
   ENVIRONMENT: string;
   BACKEND_ORIGIN: string;

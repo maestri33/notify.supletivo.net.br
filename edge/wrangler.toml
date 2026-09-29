@@ -24,6 +24,10 @@ database_id = "9f60bd23-8df1-4311-ad1f-7fc296bb0a49"
 [ai]
 binding = "AI"
 
+[[hyperdrive]]
+binding = "HYPERDRIVE"
+id = "d13fec466a424ac59c25399ee8628d4a"
+
 # ── Cloudflare Queues (Zero-Cost Async Decoupling - Workers Paid) ────────────
 [[queues.producers]]
 binding = "NOTIFY_QUEUE"
