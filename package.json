@@ -1,6 +1,6 @@
 {
   "name": "notify",
-  "version": "0.0.0-sandbox.45",
+  "version": "0.0.0-sandbox.56",
   "description": "Serviço centralizado de mensageria, notificações multicanal e integração de IA multi-tenant construído sobre **Django 5.1**, **Django Ninja (OpenAPI)**, **Django-Q2**, **Evolution GO 0.7.2** e **OmniRouter**.",
   "main": "index.js",
   "directories": {
