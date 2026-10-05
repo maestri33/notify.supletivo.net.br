@@ -145,6 +145,9 @@ CLOUDFLARE_WORKERS_AI_ENABLED = env.bool("CLOUDFLARE_WORKERS_AI_ENABLED", defaul
 CLOUDFLARE_AI_MODEL = env("CLOUDFLARE_AI_MODEL", default="@cf/meta/llama-3.1-8b-instruct")
 CLOUDFLARE_AI_STT_MODEL = env("CLOUDFLARE_AI_STT_MODEL", default="@cf/openai/whisper")
 CLOUDFLARE_AI_IMAGE_MODEL = env("CLOUDFLARE_AI_IMAGE_MODEL", default="@cf/black-forest-labs/flux-1-schnell")
+CLOUDFLARE_EMAIL_API_TOKEN = env("CLOUDFLARE_EMAIL_API_TOKEN", default=env("CLOUDFLARE_API_TOKEN", default=""))
+CLOUDFLARE_EMAIL_SENDING_ENABLED = env.bool("CLOUDFLARE_EMAIL_SENDING_ENABLED", default=True)
+
 
 # ── Omnirouter (OmniRoute HA Cluster via Cloudflare Ingress) ───
 OMNIROUTER_URL = env("OMNIROUTER_URL", default="https://ai.v7m.live")

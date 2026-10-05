@@ -58,11 +58,7 @@ class CloudflareEmailSender:
                 "address": from_address,
                 "name": from_name,
             },
-            "to": [
-                {
-                    "address": to_address,
-                }
-            ],
+            "to": [to_address],
             "subject": subject,
             "html": html_body,
         }

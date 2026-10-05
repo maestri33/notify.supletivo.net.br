@@ -803,8 +803,12 @@ def _send_email(notif: Notification) -> None:
 
         client = _get_mail_client(notif)
         cf_account_id = getattr(settings, "CLOUDFLARE_ACCOUNT_ID", "")
-        cf_token = getattr(settings, "CLOUDFLARE_EMAIL_TOKEN", "") or getattr(settings, "CLOUDFLARE_API_TOKEN", "")
-        cf_enabled = getattr(settings, "CLOUDFLARE_EMAIL_SENDING_ENABLED", False)
+        cf_token = (
+            getattr(settings, "CLOUDFLARE_EMAIL_TOKEN", "")
+            or getattr(settings, "CLOUDFLARE_EMAIL_API_TOKEN", "")
+            or getattr(settings, "CLOUDFLARE_API_TOKEN", "")
+        )
+        cf_enabled = getattr(settings, "CLOUDFLARE_EMAIL_SENDING_ENABLED", True)
 
         if client is None and not (cf_account_id and cf_token):
             notif.email_status = STATUS_FAILED
@@ -841,8 +845,9 @@ def _send_email(notif: Notification) -> None:
                 notif.account, notif.mail_template, title=notif.title or "", content=email_text,
             )
 
-        from_email = getattr(client, "_from_email", None) or "contato@supletivo.net.br"
-        from_name = getattr(client, "_from_name", None) or (shell.brand_name if shell and shell.brand_name else notif.account.name)
+        extra_dict = notif.extra if isinstance(notif.extra, dict) else {}
+        from_email = extra_dict.get("from_email") or getattr(client, "_from_email", None) or "contato@supletivo.net.br"
+        from_name = extra_dict.get("from_name") or getattr(client, "_from_name", None) or (shell.brand_name if shell and shell.brand_name else notif.account.name)
 
         res = None
         # 1. Se Cloudflare Email Sending estiver explicitamente ativo como prioritário
