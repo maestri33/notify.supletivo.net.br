@@ -16,7 +16,7 @@ if _env_file.exists():
 SECRET_KEY = env("SECRET_KEY", default="change-me-in-production")
 DEBUG = env.bool("DEBUG", default=False)
 ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=["*"])
-APP_VERSION = env("APP_VERSION", default="0.0.0-sandbox.50")
+APP_VERSION = env("APP_VERSION", default="0.0.1-beta")
 
 # ── Security & Production Hardening ─────────────────────────────────────────
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
@@ -93,7 +93,7 @@ else:
         "default": env.db("DATABASE_URL", default="sqlite:///db.sqlite3"),
     }
 
-DATABASES["default"]["CONN_MAX_AGE"] = env.int("DB_CONN_MAX_AGE", default=60)
+DATABASES["default"]["CONN_MAX_AGE"] = env.int("DB_CONN_MAX_AGE", default=0)
 DATABASES["default"]["CONN_HEALTH_CHECKS"] = True
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
@@ -127,14 +127,14 @@ R2_SECRET_ACCESS_KEY = env("R2_SECRET_ACCESS_KEY", default="")
 R2_BUCKET_NAME = env("R2_BUCKET_NAME", default="notify-media")
 R2_PUBLIC_URL = env("R2_PUBLIC_URL", default="")
 
-# ── Infisical (Cofre Centralizado de Segredos http://10.0.1.61:8080) ─────────
-INFISICAL_ENABLED = env.bool("INFISICAL_ENABLED", default=True)
-INFISICAL_BASE_URL = env("INFISICAL_BASE_URL", default="http://10.0.1.61:8080")
-INFISICAL_PROJECT_ID = env("INFISICAL_PROJECT_ID", default="1712fb45-2d75-4024-bc6b-0163d5e582a0")
+# Optional vault integration requires explicit deployment configuration.
+INFISICAL_ENABLED = env.bool("INFISICAL_ENABLED", default=False)
+INFISICAL_BASE_URL = env("INFISICAL_BASE_URL", default="")
+INFISICAL_PROJECT_ID = env("INFISICAL_PROJECT_ID", default="")
 INFISICAL_CLIENT_ID = env("INFISICAL_CLIENT_ID", default=env("INFISICAL_UNIVERSAL_AUTH_CLIENT_ID", default=""))
 INFISICAL_CLIENT_SECRET = env("INFISICAL_CLIENT_SECRET", default=env("INFISICAL_UNIVERSAL_AUTH_CLIENT_SECRET", default=""))
 INFISICAL_TOKEN = env("INFISICAL_TOKEN", default="")
-INFISICAL_ENVIRONMENT = env("INFISICAL_ENVIRONMENT", default=env("ENVIRONMENT", default="dev"))
+INFISICAL_ENVIRONMENT = env("INFISICAL_ENVIRONMENT", default=env("ENVIRONMENT", default=""))
 INFISICAL_CACHE_TTL_S = env.float("INFISICAL_CACHE_TTL_S", default=300.0)
 
 # ── Cloudflare Workers AI & AI Gateway (Serverless Edge AI) ─────────────────
@@ -160,7 +160,8 @@ AI_REASONING_MODEL = env("AI_REASONING_MODEL", default="auto/best-reasoning")
 AI_TIMEOUT_S = env.float("AI_TIMEOUT_S", default=90.0)
 # Adaptação de conteúdo POR CANAL no pipeline de envio (fail-open; ver
 # ai/adapt.py). Timeout curto de propósito: roda dentro do worker.
-AI_ADAPT_ENABLED = env.bool("AI_ADAPT_ENABLED", default=True)
+AI_ADAPT_ENABLED = env.bool("AI_ADAPT_ENABLED", default=False)
+AI_TRANSCRIBE_OUTBOUND_ENABLED = env.bool("AI_TRANSCRIBE_OUTBOUND_ENABLED", default=False)
 # 30s: medido em produção (2026-08-02), o auto/best-fast oscila entre 8s e 22s.
 # Roda no worker (não segura request HTTP) e é fail-open de toda forma.
 AI_ADAPT_TIMEOUT_S = env.float("AI_ADAPT_TIMEOUT_S", default=30.0)
@@ -217,6 +218,7 @@ FERNET_KEY = env("FERNET_KEY", default="")
 # ── Conta default (envio sem account_id — decisão: serviço sem API key) ────
 NOTIFY_DEFAULT_ACCOUNT_SLUG = env("NOTIFY_DEFAULT_ACCOUNT_SLUG", default="default")
 NOTIFY_DEFAULT_ACCOUNT_NAME = env("NOTIFY_DEFAULT_ACCOUNT_NAME", default="Notify")
+NOTIFY_REQUIRE_AUTH = env.bool("NOTIFY_REQUIRE_AUTH", default=True)
 
 # ── Watchdog / alertas / canário (Q1-Q3, K1, J3) ────────────────────────────
 # Alertas do admin saem DIRETO pela instância default da GO + e-mail da conta
@@ -225,8 +227,10 @@ ADMIN_ALERT_PHONE = env("ADMIN_ALERT_PHONE", default="")
 ADMIN_ALERT_EMAIL = env("ADMIN_ALERT_EMAIL", default="")
 WATCHDOG_INTERVAL_MIN = env.int("WATCHDOG_INTERVAL_MIN", default=1)
 WATCHDOG_HEAL_COOLDOWN_MIN = env.int("WATCHDOG_HEAL_COOLDOWN_MIN", default=10)
+WATCHDOG_AUTO_HEAL_ENABLED = env.bool("WATCHDOG_AUTO_HEAL_ENABLED", default=False)
+WATCHDOG_STATUS_MAX_AGE_S = env.int("WATCHDOG_STATUS_MAX_AGE_S", default=180)
 WATCHDOG_QUEUE_ALERT = env.int("WATCHDOG_QUEUE_ALERT", default=50)
-CANARY_ENABLED = env.bool("CANARY_ENABLED", default=True)
+CANARY_ENABLED = env.bool("CANARY_ENABLED", default=False)
 CANARY_PHONE = env("CANARY_PHONE", default="")
 CANARY_EMAIL = env("CANARY_EMAIL", default="")
 CANARY_HOUR = env.int("CANARY_HOUR", default=8)  # todo dia às 08h (local)
