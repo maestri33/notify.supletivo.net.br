@@ -76,10 +76,12 @@ def test_falha_num_canal_nao_derruba_o_outro(account, _real_dispatch, monkeypatc
     monkeypatch.setattr(dispatch_mod, "_send_email", _mail)
 
     notif = _notif(account)
-    dispatch_mod.dispatch(notif.id)  # sem raise
+    with pytest.raises(dispatch_mod.DispatchFailedError):
+        dispatch_mod.dispatch(notif.id)
 
     notif.refresh_from_db()
     assert notif.email_status == "sent"
+    assert notif.whatsapp_status == "failed"
 
 
 def test_um_canal_so_nao_abre_thread(account, _real_dispatch, monkeypatch):

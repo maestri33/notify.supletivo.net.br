@@ -1,14 +1,8 @@
-"""Resolução de conta — SEM exigir API key (serviço vive só na VPN).
+"""Account-scoped authentication with an explicit private-network legacy mode.
 
-Decisão do Chefe (2026-08-02): "indiferente se mandar key ou não, mas a partir
-de agora é sem key". A ordem de resolução é:
-
-1. `Authorization: Bearer <key>` VÁLIDA → conta da key (compat com apps que já
-   mandam; key errada não derruba — cai pro passo seguinte);
-2. `account_id` no payload (aceita slug ou id numérico) → aquela conta;
-3. nada → conta DEFAULT (`NOTIFY_DEFAULT_ACCOUNT_SLUG`, padrão "default").
-
-Conta inexistente ou inativa → 404/403 com mensagem clara, nunca silêncio.
+Production requires an active ApiKey by default. Invalid or missing credentials
+never fall through to the default account when NOTIFY_REQUIRE_AUTH is enabled.
+The legacy account_id/default contract is available only by explicit opt-out.
 """
 
 from __future__ import annotations
@@ -49,6 +43,8 @@ def resolve_account(request, account_id: str | int | None = None) -> Account:
     account = _account_by_key(request)
     if account is not None:
         return account
+    if getattr(settings, "NOTIFY_REQUIRE_AUTH", True):
+        raise HttpError(401, "Credencial de notificacao ausente ou invalida.")
     if account_id:
         return _account_by_id(account_id)
     from accounts.bootstrap import ensure_default_account

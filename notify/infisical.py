@@ -1,4 +1,4 @@
-"""Cliente de segredos do Infisical (http://10.0.1.61:8080).
+"""Optional Infisical client with explicit deployment configuration.
 
 Permite carregar credenciais em tempo de execução via Universal Auth ou Token,
 sem expor nem comitar arquivos .env no repositório.
@@ -16,11 +16,6 @@ from django.conf import settings
 
 logger = structlog.get_logger()
 
-DEFAULT_BASE_URL = "http://10.0.1.61:8080"
-DEFAULT_PROJECT_ID = "1712fb45-2d75-4024-bc6b-0163d5e582a0"
-DEFAULT_ENVIRONMENT = "dev"
-DEFAULT_CLIENT_ID = "3661356e-9d41-4da8-9d76-87436031c0f3"
-DEFAULT_CLIENT_SECRET = "d6edf6ff14393f3eec93ecb81d4c1e4e2565fd2c784d29e921581eabf99c7068"
 DEFAULT_CACHE_TTL_S = 300.0
 
 KNOWN_SECRET_KEYS = [
@@ -57,28 +52,23 @@ class InfisicalClient:
         self.base_url = (
             base_url
             or getattr(settings, "INFISICAL_BASE_URL", "")
-            or DEFAULT_BASE_URL
         ).rstrip("/")
         self.project_id = (
             project_id
             or getattr(settings, "INFISICAL_PROJECT_ID", "")
-            or DEFAULT_PROJECT_ID
         )
         self.environment = (
             environment
             or getattr(settings, "INFISICAL_ENVIRONMENT", "")
             or getattr(settings, "ENVIRONMENT", "")
-            or DEFAULT_ENVIRONMENT
         )
         self.client_id = (
             client_id
             or getattr(settings, "INFISICAL_CLIENT_ID", "")
-            or DEFAULT_CLIENT_ID
         )
         self.client_secret = (
             client_secret
             or getattr(settings, "INFISICAL_CLIENT_SECRET", "")
-            or DEFAULT_CLIENT_SECRET
         )
         self.token = token or getattr(settings, "INFISICAL_TOKEN", "")
         self.timeout = timeout
@@ -93,6 +83,9 @@ class InfisicalClient:
 
         if not self.client_id or not self.client_secret:
             raise InfisicalError("INFISICAL_CLIENT_ID e CLIENT_SECRET (Universal Auth) ausentes")
+
+        if not self.base_url:
+            raise InfisicalError("INFISICAL_BASE_URL ausente")
 
         url = f"{self.base_url}/api/v1/auth/universal-auth/login"
         payload = {"clientId": self.client_id, "clientSecret": self.client_secret}
@@ -115,6 +108,8 @@ class InfisicalClient:
 
     def fetch_raw_secrets(self, *, path: str = "/") -> dict[str, str]:
         """Busca segredos crus via GET /api/v3/secrets/raw com fallback individual para projetos sem blind index."""
+        if not self.base_url or not self.project_id or not self.environment:
+            raise InfisicalError("Infisical requer base URL, projeto e ambiente explicitos")
         token = self._get_access_token()
         headers = {
             "Authorization": f"Bearer {token}",
@@ -168,12 +163,11 @@ def get_all_secrets(*, force_refresh: bool = False, force_enabled: bool = False)
     """Retorna mapa de segredos com cache em memória (TTL 300s)."""
     global _cache, _cache_expires_at
 
-    now = time.time()
-    if not force_refresh and _cache and now < _cache_expires_at:
-        return _cache
-
     enabled = getattr(settings, "INFISICAL_ENABLED", False) or force_enabled
     if not enabled:
+        return {}
+    now = time.time()
+    if not force_refresh and now < _cache_expires_at:
         return _cache
 
     try:
@@ -184,7 +178,8 @@ def get_all_secrets(*, force_refresh: bool = False, force_enabled: bool = False)
         logger.info("infisical.secrets_loaded", count=len(secrets), env=client.environment)
         return _cache
     except Exception as exc:
-        logger.warning("infisical.fetch_failed_failopen", error=str(exc)[:160])
+        _cache_expires_at = now + float(getattr(settings, "INFISICAL_CACHE_TTL_S", DEFAULT_CACHE_TTL_S))
+        logger.warning("infisical.fetch_failed_failopen", error=type(exc).__name__)
         return _cache
 
 

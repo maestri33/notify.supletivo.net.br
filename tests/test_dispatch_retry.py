@@ -15,7 +15,7 @@ from django.test import override_settings
 
 from mail.client import MailError
 from notify import dispatch as dispatch_mod
-from notify.dispatch import TransientDispatchError
+from notify.dispatch import DispatchFailedError, TransientDispatchError
 from notify.models import Notification
 from whatsapp.driver import WhatsAppDriver
 from whatsapp.errors import WhatsAppSessionDown, WhatsAppTransportError
@@ -91,7 +91,8 @@ def test_erro_de_negocio_e_failed_definitivo(account, monkeypatch):
     )
     notif = _notif(account)
 
-    dispatch_mod.dispatch(notif.id)  # sem raise
+    with pytest.raises(DispatchFailedError):
+        dispatch_mod.dispatch(notif.id)
 
     notif.refresh_from_db()
     assert notif.whatsapp_status == "failed"
@@ -121,7 +122,8 @@ def test_esgotou_attempts_e_failed(account, monkeypatch):
     notif.attempts = 2  # próxima chamada vira a 3ª (max do Q_CLUSTER)
     notif.save(update_fields=["attempts"])
 
-    dispatch_mod.dispatch(notif.id)  # 3ª tentativa: sem raise
+    with pytest.raises(DispatchFailedError):
+        dispatch_mod.dispatch(notif.id)
 
     notif.refresh_from_db()
     assert notif.attempts == 3
@@ -165,7 +167,8 @@ def test_destinatario_recusado_nao_e_transitorio(account, monkeypatch):
         recipient_email="x@example.com",
     )
 
-    dispatch_mod.dispatch(notif.id)  # sem raise
+    with pytest.raises(DispatchFailedError):
+        dispatch_mod.dispatch(notif.id)
 
     notif.refresh_from_db()
     assert notif.email_status == "failed"

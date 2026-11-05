@@ -12,6 +12,7 @@ DATABASES = {
 }
 
 TEST_MODE = True
+NOTIFY_REQUIRE_AUTH = False  # Explicitly exercise the legacy private-network contract.
 
 # Sem chave, `mail.crypto` devolve o texto como veio (comportamento de dev) e o
 # teste que verifica "a senha foi guardada cifrada" passava a comparar plaintext

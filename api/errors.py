@@ -24,6 +24,37 @@ class ErrorOut(Schema):
     code: str | None = None
 
 
+class DispatchErrorOut(ErrorOut):
+    external_id: str
+    status: str
+    channels: dict[str, str]
+
+
+def synchronous_dispatch_error(account, external_id: str, *, synchronous: bool) -> dict | None:
+    """Synchronous acceptance must reflect the requested channels' actual result."""
+    if not synchronous:
+        return None
+    from notify.models import Notification, STATUS_SENT
+
+    notif = Notification.objects.filter(account=account, external_id=external_id).first()
+    channels = {}
+    if notif is not None:
+        for channel, requested in (("whatsapp", notif.want_whatsapp and bool(notif.recipient_phone)),
+                                   ("email", notif.want_email and bool(notif.recipient_email)),
+                                   ("sms", notif.want_sms and bool(notif.recipient_phone))):
+            if requested:
+                channels[channel] = getattr(notif, f"{channel}_status")
+    if channels and all(status == STATUS_SENT for status in channels.values()):
+        return None
+    return {
+        "detail": "Nao foi possivel enviar por todos os canais solicitados.",
+        "code": "delivery_unavailable",
+        "external_id": str(external_id),
+        "status": "partial" if STATUS_SENT in channels.values() else "failed",
+        "channels": channels,
+    }
+
+
 class BusinessError(Exception):
     """Exceção base para regras de negócio violadas na camada de domínio."""
 

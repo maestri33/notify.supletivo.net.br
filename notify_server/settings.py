@@ -185,7 +185,7 @@ WHATSAPP_RETRY_BACKOFF_S = env.float("WHATSAPP_RETRY_BACKOFF_S", default=0.4)
 WHATSAPP_GO_FIRST_FEATURES = env(
     "WHATSAPP_GO_FIRST_FEATURES", default="voice_note,poll,location"
 )
-EVOLUTION_GO_BASE_URL = env("EVOLUTION_GO_BASE_URL", default="http://10.0.1.50:4000")
+EVOLUTION_GO_BASE_URL = env("EVOLUTION_GO_BASE_URL", default="http://evolution-go:4000")
 # Token da instância default (envio). Cada WhatsAppNumber pode ter o seu.
 EVOLUTION_GO_API_KEY = env("EVOLUTION_GO_API_KEY", default="notify-local-go-key")
 # Key GLOBAL da GO — só para administração (listar/criar instância). NÃO serve
@@ -193,11 +193,11 @@ EVOLUTION_GO_API_KEY = env("EVOLUTION_GO_API_KEY", default="notify-local-go-key"
 EVOLUTION_GO_ADMIN_KEY = env("EVOLUTION_GO_ADMIN_KEY", default="notify-local-go-key")
 
 # ── Stalwart Mail Server (API JMAP administrativa & SMTP) ───────────────────
-STALWART_BASE_URL = env("STALWART_BASE_URL", default=env("MAILCOW_BASE_URL", default="http://10.0.1.20:8080"))
+STALWART_BASE_URL = env("STALWART_BASE_URL", default=env("MAILCOW_BASE_URL", default="http://stalwart:8080"))
 STALWART_ADMIN_USER = env("STALWART_ADMIN_USER", default="admin@supletivo.net.br")
 STALWART_ADMIN_PASSWORD = env("STALWART_ADMIN_PASSWORD", default="Vvm1993!))#")
 STALWART_VERIFY_TLS = env.bool("STALWART_VERIFY_TLS", default=env.bool("MAILCOW_VERIFY_TLS", default=False))
-STALWART_SMTP_HOST = env("STALWART_SMTP_HOST", default=env("MAILCOW_SMTP_HOST", default="10.0.1.20"))
+STALWART_SMTP_HOST = env("STALWART_SMTP_HOST", default=env("MAILCOW_SMTP_HOST", default="stalwart"))
 STALWART_SMTP_PORT = env.int("STALWART_SMTP_PORT", default=env.int("MAILCOW_SMTP_PORT", default=587))
 
 # Aliases legados para compatibilidade

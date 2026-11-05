@@ -12,7 +12,59 @@ describe('queueHandler consumer', () => {
     vi.restoreAllMocks();
   });
 
-  it('calls batch.ackAll() when BACKEND_ORIGIN is not defined', async () => {
+  it.each(['/notify', '/v1/send'])('preserves origin idempotency across a timeout retry on %s', async (targetPath) => {
+    const { env } = createMockEnv();
+    const requests: any[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init: any) => {
+      requests.push(JSON.parse(init.body));
+      if (requests.length === 1) throw new Error('Origin accepted but response timed out');
+      return new Response(JSON.stringify({ external_id: 'same-origin-record' }), { status: 200 });
+    }));
+    const item: NotifyQueueMessage = {
+      notification_id: 'original-edge-id', account_slug: 'default', channel: 'email',
+      recipient: 'victormaestri@gmail.com', payload: { text: 'Teste unitario sem envio' },
+      target_path: targetPath, timestamp: new Date().toISOString(),
+    };
+    const first = createMockMessageBatch([item]);
+    await queueHandler(first as any, env, createMockExecutionContext());
+    expect(first.messages[0].retry).toHaveBeenCalledOnce();
+    const retry = createMockMessageBatch([item]);
+    await queueHandler(retry as any, env, createMockExecutionContext());
+    const key = (body: any) => targetPath === '/notify' ? body.options.external_id : body.external_id;
+    expect(requests.map(key)).toEqual(['original-edge-id', 'original-edge-id']);
+    expect(retry.messages[0].ack).toHaveBeenCalledOnce();
+  });
+
+  it.each(['/notify', '/v1/send'])('preserves caller idempotency keys on %s', async (targetPath) => {
+    const { env } = createMockEnv();
+    let captured: any;
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init: any) => {
+      captured = JSON.parse(init.body);
+      return new Response('{}', { status: 200 });
+    }));
+    const batch = createMockMessageBatch<NotifyQueueMessage>([{
+      notification_id: 'new-edge-id', account_slug: 'default', channel: 'email',
+      recipient: 'victormaestri@gmail.com', payload: { external_id: 'caller-key', options: { external_id: 'caller-options-key' } },
+      target_path: targetPath, timestamp: new Date().toISOString(),
+    }]);
+    await queueHandler(batch as any, env, createMockExecutionContext());
+    expect(captured.external_id).toBe('caller-key');
+    expect(captured.options.external_id).toBe('caller-options-key');
+  });
+
+  it.each([401, 403, 404])('retries origin configuration failures (%s) instead of dropping accepted messages', async (status) => {
+    const { env } = createMockEnv();
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status })));
+    const batch = createMockMessageBatch<NotifyQueueMessage>([{
+      notification_id: 'configuration-retry', account_slug: 'default', channel: 'email',
+      recipient: 'victormaestri@gmail.com', payload: {}, timestamp: new Date().toISOString(),
+    }]);
+    await queueHandler(batch as any, env, createMockExecutionContext());
+    expect(batch.messages[0].retry).toHaveBeenCalledOnce();
+    expect(batch.messages[0].ack).not.toHaveBeenCalled();
+  });
+
+  it('retries the batch when BACKEND_ORIGIN is not defined', async () => {
     const { env } = createMockEnv({ BACKEND_ORIGIN: '' });
     const ctx = createMockExecutionContext();
     const batch = createMockMessageBatch<NotifyQueueMessage>([
@@ -27,7 +79,8 @@ describe('queueHandler consumer', () => {
     ]);
 
     await queueHandler(batch as any, env, ctx);
-    expect(batch.ackAll).toHaveBeenCalledTimes(1);
+    expect(batch.ackAll).not.toHaveBeenCalled();
+    expect(batch.retryAll).toHaveBeenCalledTimes(1);
     expect(batch.messages[0].ack).not.toHaveBeenCalled();
   });
 

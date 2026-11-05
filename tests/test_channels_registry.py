@@ -82,7 +82,8 @@ def test_sender_que_estoura_vira_failed(account, _real_dispatch):
     channels_registry.register("sms", send_sms)
     notif = _sms_notif(account)
 
-    dispatch_mod.dispatch(notif.id)
+    with pytest.raises(dispatch_mod.DispatchFailedError):
+        dispatch_mod.dispatch(notif.id)
 
     notif.refresh_from_db()
     assert notif.sms_status == "failed"

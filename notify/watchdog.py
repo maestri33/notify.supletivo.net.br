@@ -1,23 +1,10 @@
-"""Watchdog — "está tudo ligado?" com auto-cura e alerta (Q1/Q2/Q3/K1/J3).
+"""Persisted provider health and bounded, opt-in recovery.
 
-Roda como Schedule da Django-Q a cada N minutos (`notify_schedules` cria).
-Cada tick:
-
-1. checa os serviços (GO, mailcow, OmniRouter) + tamanho da fila;
-2. **auto-heal** (K1): instância da GO com credencial e sem sessão recebe
-   `POST /instance/connect immediate` — é exatamente o gesto que faltou no
-   apagão de 17/08/2026, quando a GO marcou `connected=false` após um blip de
-   rede e nunca mais tentou sozinha (o wuzapi não tem auto-retry para isso;
-   a sessão fica íntegra, só ninguém aperta o botão). A checagem roda em todo
-   tick; o cooldown (`WATCHDOG_HEAL_COOLDOWN_MIN`) só evita martelar a GO em
-   loop curto;
-3. transição ok↔fora dispara alerta ao admin (WhatsApp DIRETO pela instância
-   default da GO + e-mail — sem passar pelo pipeline, para o alerta não
-   depender do que está quebrado) e evento `service` nos webhooks das contas;
-4. persiste tudo em `ServiceStatus` — o dashboard mostra este retrato.
-
-O canário (Q3) é outra Schedule (diária): um envio REAL pro destino de
-controle do Chefe pela conta default; falha → alerta.
+Scheduled probes never force reconnect. Automatic recovery is disabled by
+default and allows one connect per outage when explicitly enabled. A recent
+healthy probe resets this persisted budget. Manual force recovery is separate.
+Evolution GO reconnects can leak SQL pools (upstream issue #118); repeatedly
+reconnecting during an outage can exhaust the database again.
 """
 
 from __future__ import annotations
@@ -69,7 +56,7 @@ def _go_tokens() -> dict[str, str]:
     return {k: v for k, v in tokens.items() if v}
 
 
-def _check_and_heal_license(base: str) -> bool:
+def _check_and_heal_license(base: str, *, heal: bool = False) -> bool:
     """Verifica e recupera a licença do Evolution GO automaticamente."""
     admin_key = (
         getattr(settings, "EVOLUTION_GO_ADMIN_KEY", "")
@@ -90,8 +77,8 @@ def _check_and_heal_license(base: str) -> bool:
         logger.warning("watchdog.license_check_failed", error=str(exc))
         return True
 
-    if not admin_key:
-        logger.warning("watchdog.license_heal_skipped_no_admin_key")
+    if not heal or not admin_key:
+        logger.warning("watchdog.license_heal_skipped")
         return False
 
     logger.warning("watchdog.license_inactive_triggering_heal")
@@ -119,15 +106,15 @@ def _check_go(heal: bool = True, force_heal: bool = False) -> tuple[bool, str]:
         return False, "EVOLUTION_GO_BASE_URL não configurada"
 
     # Passo 1: Checar e auto-recuperar a licença
-    license_ok = _check_and_heal_license(base)
+    license_ok = _check_and_heal_license(base, heal=force_heal)
     if not license_ok:
-        return False, "licença inativa (503 LICENSE_REQUIRED) — auto-heal acionado"
+        return False, "licenca inativa; recuperacao exige comando explicito"
 
     # Passo 2: Checar cada número cadastrado
     numbers = list(WhatsAppNumber.objects.all())
     default_key = getattr(settings, "EVOLUTION_GO_API_KEY", "")
     if not numbers and not default_key:
-        return True, "Evolution GO online (nenhum número WhatsApp cadastrado)"
+        return False, "nenhum numero WhatsApp configurado"
 
     targets: dict[str, str] = {}
     for num in numbers:
@@ -142,7 +129,7 @@ def _check_go(heal: bool = True, force_heal: bool = False) -> tuple[bool, str]:
         try:
             r = httpx.get(f"{base}/instance/status", headers={"apikey": tok}, timeout=8.0)
             d = r.json().get("data", {}) if getattr(r, "status_code", None) == 200 else {}
-            if d.get("LoggedIn"):
+            if d.get("LoggedIn") is True and d.get("Connected") is True:
                 logadas.append(nome)
                 WhatsAppNumber.objects.filter(instance_name=nome).exclude(connection_status="open").update(
                     connection_status="open", status_checked_at=timezone.now()
@@ -155,7 +142,7 @@ def _check_go(heal: bool = True, force_heal: bool = False) -> tuple[bool, str]:
         except Exception:  # noqa: BLE001
             fora.append(nome)
 
-    if heal and fora:
+    if heal and fora and (force_heal or getattr(settings, "WATCHDOG_AUTO_HEAL_ENABLED", False)):
         _heal_go(base, {n: targets[n] for n in fora if n in targets}, force=force_heal)
         # Reavalia o estado após o auto-heal
         logadas, fora = [], []
@@ -163,14 +150,17 @@ def _check_go(heal: bool = True, force_heal: bool = False) -> tuple[bool, str]:
             try:
                 r = httpx.get(f"{base}/instance/status", headers={"apikey": tok}, timeout=5.0)
                 d = r.json().get("data", {}) if getattr(r, "status_code", None) == 200 else {}
-                if d.get("LoggedIn"):
+                if d.get("LoggedIn") is True and d.get("Connected") is True:
                     logadas.append(nome)
                 else:
                     fora.append(nome)
             except Exception:  # noqa: BLE001
                 fora.append(nome)
 
-    ok = bool(logadas)
+    ok = bool(logadas) and not fora
+    if ok:
+        from notify.models import ServiceStatus
+        ServiceStatus.objects.filter(name="evolution-go").update(heal_attempted_at=None)
     detail = f"logadas: {', '.join(logadas) or '-'} · sem sessão: {', '.join(fora) or '-'}"
     return ok, detail
 
@@ -182,13 +172,13 @@ def _heal_go(base: str, fora: dict[str, str], force: bool = False) -> bool:
     Fase 2: Se permanecer desconectada (sessão zumbi na memória da GO), dispara
             POST /instance/forcereconnect/{instanceId} com Admin Key.
     """
-    from datetime import timedelta
     from channels.models import WhatsAppNumber
 
     row = _status_row("evolution-go")
-    cooldown = timedelta(minutes=int(getattr(settings, "WATCHDOG_HEAL_COOLDOWN_MIN", 10)))
-    if not force and row.heal_attempted_at and timezone.now() - row.heal_attempted_at < cooldown:
-        logger.info("watchdog.heal_cooldown", restantes_min=cooldown.total_seconds() // 60)
+    # Upstream reconnect can leak SQL pools. Automatic recovery gets one
+    # attempt per outage; a healthy probe resets the persisted budget.
+    if not force and row.heal_attempted_at:
+        logger.info("watchdog.heal_budget_exhausted")
         return False
     row.heal_attempted_at = timezone.now()
     row.save(update_fields=["heal_attempted_at"])
@@ -197,7 +187,7 @@ def _heal_go(base: str, fora: dict[str, str], force: bool = False) -> bool:
     admin_key = (
         getattr(settings, "EVOLUTION_GO_ADMIN_KEY", "")
         or getattr(settings, "GLOBAL_API_KEY", "")
-        or "621dbeb7c33b74cda265687b1d5e8d9e3f9a97ddfe2cbffec439124d884163e3"
+
     )
 
     still_down: dict[str, str] = {}
@@ -217,7 +207,7 @@ def _heal_go(base: str, fora: dict[str, str], force: bool = False) -> bool:
             )
             logger.info("watchdog.heal_go.connect", instance=nome, status_code=getattr(resp, "status_code", 200))
             r = httpx.get(f"{base}/instance/status", headers={"apikey": tok}, timeout=5.0)
-            if getattr(r, "status_code", None) == 200 and r.json().get("data", {}).get("LoggedIn"):
+            if getattr(r, "status_code", None) == 200 and r.json().get("data", {}).get("LoggedIn") is True and r.json().get("data", {}).get("Connected") is True:
                 WhatsAppNumber.objects.filter(instance_name=nome).update(
                     connection_status="open", status_checked_at=timezone.now()
                 )
@@ -228,7 +218,7 @@ def _heal_go(base: str, fora: dict[str, str], force: bool = False) -> bool:
             still_down[nome] = tok
 
     # Fase 2: Forçar reconexão administrativa se a GO travou o cliente em memória
-    if still_down:
+    if still_down and force and admin_key:
         instances_map: dict[str, dict] = {}
         try:
             resp_all = httpx.get(
@@ -268,7 +258,7 @@ def _heal_go(base: str, fora: dict[str, str], force: bool = False) -> bool:
                         status_code=getattr(resp_frc, "status_code", 200),
                     )
                     r = httpx.get(f"{base}/instance/status", headers={"apikey": tok}, timeout=5.0)
-                    if getattr(r, "status_code", None) == 200 and r.json().get("data", {}).get("LoggedIn"):
+                    if getattr(r, "status_code", None) == 200 and r.json().get("data", {}).get("LoggedIn") is True and r.json().get("data", {}).get("Connected") is True:
                         WhatsAppNumber.objects.filter(instance_name=nome).update(
                             connection_status="open", status_checked_at=timezone.now()
                         )
@@ -396,10 +386,7 @@ def tick(force_heal: bool = False) -> dict:
     resultados = {}
 
     def _call_check_go():
-        try:
-            return _check_go(force_heal=force_heal)
-        except TypeError:
-            return _check_go()
+        return _check_go(force_heal=force_heal)
 
     checks = {
         "evolution-go": _call_check_go,
@@ -451,7 +438,7 @@ def canary() -> str | None:
     try:
         ext = send(
             account=account,
-            text=f"🐤 canário do notify — {stamp}. Cadeia ponta a ponta validada.",
+            text=f"🐤 canário do notify — {stamp}. Verificacao tecnica do envio agendado.",
             caller="watchdog.canary",
             phone=phone or None,
             email=email or None,

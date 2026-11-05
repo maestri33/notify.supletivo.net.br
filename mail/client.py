@@ -84,9 +84,19 @@ class MailClient:
 
     def _send_sync(self, msg: MIMEMultipart, to_email: str) -> dict:
         try:
-            with smtplib.SMTP(self._host, self._port, timeout=self._timeout) as srv:
-                self._upgrade_and_login(srv)
-                srv.send_message(msg)
+            if self._port == 465:
+                import ssl
+                ctx = ssl.create_default_context()
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
+                with smtplib.SMTP_SSL(self._host, self._port, timeout=self._timeout, context=ctx) as srv:
+                    if self._user and self._password:
+                        srv.login(self._user, self._password)
+                    srv.send_message(msg)
+            else:
+                with smtplib.SMTP(self._host, self._port, timeout=self._timeout) as srv:
+                    self._upgrade_and_login(srv)
+                    srv.send_message(msg)
         except smtplib.SMTPRecipientsRefused as exc:
             logger.warning("mail.recipients_refused", to=to_email)
             raise MailError(

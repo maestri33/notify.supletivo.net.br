@@ -19,7 +19,7 @@ from ninja.errors import HttpError
 from pydantic import field_validator, model_validator
 
 from accounts.auth import api_key_auth, resolve_account
-from api.errors import ErrorOut
+from api.errors import DispatchErrorOut, ErrorOut, synchronous_dispatch_error
 
 logger = structlog.get_logger()
 router = Router(tags=["notify"])
@@ -157,7 +157,7 @@ class NotifyOut(Schema):
 
 @router.post(
     "",
-    response={200: NotifyOut, 400: ErrorOut, 403: ErrorOut, 404: ErrorOut},
+    response={200: NotifyOut, 400: ErrorOut, 403: ErrorOut, 404: ErrorOut, 503: DispatchErrorOut},
     summary="Envio de notificação (contrato IA-first)",
     description="Dispara notificações via WhatsApp e/ou E-mail com base na presença dos destinatários.",
 )
@@ -219,6 +219,12 @@ def notify(request, payload: NotifyIn):
         raise HttpError(400, str(exc)) from exc
 
     logger.info("notify.api_notify", account=account.slug, channels=channels)
+    error = synchronous_dispatch_error(
+        account, ext,
+        synchronous=opts.run_sync or opts.is_otp or opts.caller == "users.auth.otp" or bool((opts.extra or {}).get("is_otp")),
+    )
+    if error is not None:
+        return 503, error
     return {"external_id": ext, "account": account.slug, "channels": channels}
 
 

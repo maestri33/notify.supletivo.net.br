@@ -23,11 +23,47 @@ export type Env = {
   ENVIRONMENT: string;
   BACKEND_ORIGIN: string;
   BACKEND_SERVICE_TOKEN?: string;
+  NOTIFY_API_KEY?: string;
+  NOTIFY_REQUIRE_AUTH?: string | boolean;
 };
 
 export const app = new Hono<{ Bindings: Env }>();
 
 app.use('*', cors());
+
+function originPayload(payload: Record<string, any>, targetPath: string, notificationId: string) {
+  const result = { ...payload };
+  if (targetPath === '/notify') {
+    result.options = {
+      ...payload.options,
+      external_id: payload.options?.external_id || payload.external_id || payload.idempotency_key || notificationId,
+    };
+  } else {
+    result.external_id = payload.external_id || payload.options?.external_id || payload.idempotency_key || notificationId;
+  }
+  return result;
+}
+
+async function authorize(request: Request, env: Env): Promise<Response | null> {
+  if (env.NOTIFY_REQUIRE_AUTH === false || env.NOTIFY_REQUIRE_AUTH === 'false') return null;
+  if (!env.NOTIFY_API_KEY) return Response.json({ error: 'Notification authentication is not configured' }, { status: 503 });
+  const token = request.headers.get('Authorization') || '';
+  const expected = `Bearer ${env.NOTIFY_API_KEY}`;
+  const encoder = new TextEncoder();
+  const [receivedHash, expectedHash] = await Promise.all([token, expected].map(async (value) =>
+    new Uint8Array(await crypto.subtle.digest('SHA-256', encoder.encode(value)))));
+  let mismatch = 0;
+  for (let i = 0; i < receivedHash.length; i++) mismatch |= receivedHash[i] ^ expectedHash[i];
+  return mismatch === 0 ? null : Response.json({ error: 'Unauthorized' }, { status: 401 });
+}
+
+for (const path of ['/notify', '/v1/send', '/mcp', '/reports/*']) {
+  app.use(path, async (c, next) => {
+    if (c.req.method === 'OPTIONS') return next();
+    const rejection = await authorize(c.req.raw, c.env);
+    return rejection || next();
+  });
+}
 
 // ── 0. Root Service Info ───────────────────────────────────────────────────
 app.get('/', (c) => {
@@ -118,6 +154,9 @@ const handleSend = async (c: any) => {
   if (!recipient || !content) {
     return c.json({ error: 'Missing mandatory fields: recipient/whatsapp/email and content/text are required' }, 400);
   }
+  if (!c.env.BACKEND_ORIGIN) {
+    return c.json({ ok: false, status: 'failed', error: 'Notification origin is not configured' }, 503);
+  }
 
   const accountSlug = c.req.header('X-Account-Slug') || body.account_id || 'default';
   const caller = body.caller || body.options?.caller || body.extra?.caller || '';
@@ -126,6 +165,7 @@ const handleSend = async (c: any) => {
     body.is_otp === true ||
     body.options?.is_otp === true ||
     body.extra?.is_otp === true;
+  const isSynchronous = isOtp || body.run_sync === true || body.options?.run_sync === true;
 
   // 1. Verificação de idempotência no D1 com suporte a cooldown inteligente de OTP (60s)
   if (idempotency_key) {
@@ -160,6 +200,8 @@ const handleSend = async (c: any) => {
 
   // 2. Registro preliminar na borda (D1)
   const notificationId = crypto.randomUUID();
+  const targetPath = c.req?.path?.startsWith('/notify') ? '/notify' : '/v1/send';
+  const dispatchPayload = originPayload(body, targetPath, notificationId);
 
   await c.env.DB.prepare(
     `INSERT INTO notifications (id, account_slug, channel, recipient, subject, status, idempotency_key, payload_json)
@@ -172,14 +214,19 @@ const handleSend = async (c: any) => {
       recipient,
       subject,
       idempotency_key,
-      JSON.stringify(body)
+      JSON.stringify(dispatchPayload)
     )
     .run();
 
+  const rejectDispatch = async (error: string, status = 503, details: Record<string, any> = {}) => {
+    await c.env.DB.prepare("UPDATE notifications SET status = 'failed' WHERE id = ?")
+      .bind(notificationId).run();
+    return c.json({ ...details, ok: false, status: details.status || 'failed', error }, status);
+  };
+
   // 3. Encaminhamento assíncrono via Cloudflare Queue (ou direto ao Proxmox via Tunnel)
   let backendResult: any = { status: 'queued', notification_id: notificationId };
-  const targetPath = c.req?.path?.startsWith('/notify') ? '/notify' : '/v1/send';
-  const shouldEnqueue = !isOtp && body.run_sync !== true && (body.enqueue === true || body.options?.enqueue === true || body.async === true);
+  const shouldEnqueue = !isSynchronous && (body.enqueue === true || body.options?.enqueue === true || body.async === true);
 
   if (shouldEnqueue && c.env.NOTIFY_QUEUE) {
     try {
@@ -189,9 +236,8 @@ const handleSend = async (c: any) => {
         channel,
         recipient,
         subject,
-        payload: body,
+        payload: dispatchPayload,
         is_otp: isOtp,
-        auth_header: c.req.header('Authorization'),
         target_path: targetPath,
         timestamp: new Date().toISOString(),
       });
@@ -201,13 +247,8 @@ const handleSend = async (c: any) => {
         external_id: notificationId,
         queue: 'notify-events',
       };
-    } catch (qErr: any) {
-      backendResult = {
-        status: 'queued_edge',
-        notification_id: notificationId,
-        external_id: notificationId,
-        warning: `Queue send error: ${qErr.message}`,
-      };
+    } catch {
+      return rejectDispatch('Notification queue is unavailable');
     }
   } else if (c.env.BACKEND_ORIGIN) {
     try {
@@ -232,7 +273,8 @@ const handleSend = async (c: any) => {
       const resp = await fetch(backendUrl, {
         method: 'POST',
         headers: backendHeaders,
-        body: JSON.stringify(body),
+        body: JSON.stringify(dispatchPayload),
+        signal: AbortSignal.timeout(10000),
       });
 
       if (resp.ok) {
@@ -249,9 +291,13 @@ const handleSend = async (c: any) => {
           // ExecutionContext pode não estar disponível em ambientes de teste direto
         }
       } else {
+        if (resp.status === 400 || resp.status === 422) {
+          return rejectDispatch('Notification rejected by origin', resp.status);
+        }
         // Se for OTP, falha imediatamente com 502 para acionar retry no chamador
-        if (isOtp) {
-          return c.json({ ok: false, error: 'OTP dispatch failed at backend origin', status: 'failed' }, 502);
+        if (isSynchronous) {
+          const details = await resp.json().catch(() => ({}));
+          return rejectDispatch(isOtp ? 'OTP dispatch failed at backend origin' : 'Synchronous dispatch failed at backend origin', isOtp ? 502 : 503, details);
         }
 
         // Se backend falhar e não for OTP, tenta enfileirar para absorção resiliente
@@ -262,9 +308,8 @@ const handleSend = async (c: any) => {
             channel,
             recipient,
             subject,
-            payload: body,
+            payload: dispatchPayload,
             is_otp: false,
-            auth_header: auth,
             target_path: targetPath,
             timestamp: new Date().toISOString(),
           });
@@ -274,11 +319,13 @@ const handleSend = async (c: any) => {
             external_id: notificationId,
             queue: 'notify-events-fallback',
           };
+        } else {
+          return rejectDispatch('Notification origin is unavailable');
         }
       }
     } catch (err: any) {
-      if (isOtp) {
-        return c.json({ ok: false, error: `OTP dispatch error: ${err.message}`, status: 'failed' }, 502);
+      if (isSynchronous) {
+        return rejectDispatch(isOtp ? 'OTP dispatch failed at backend origin' : 'Synchronous dispatch failed at backend origin', isOtp ? 502 : 503);
       }
 
       if (c.env.NOTIFY_QUEUE) {
@@ -289,9 +336,8 @@ const handleSend = async (c: any) => {
             channel,
             recipient,
             subject,
-            payload: body,
+            payload: dispatchPayload,
             is_otp: false,
-            auth_header: c.req.header('Authorization'),
             target_path: targetPath,
             timestamp: new Date().toISOString(),
           });
@@ -302,20 +348,10 @@ const handleSend = async (c: any) => {
             queue: 'notify-events-fallback',
           };
         } catch {
-          backendResult = {
-            status: 'queued_edge',
-            notification_id: notificationId,
-            external_id: notificationId,
-            warning: 'Backend dispatch deferred to queue',
-          };
+          return rejectDispatch('Notification origin and queue are unavailable');
         }
       } else {
-        backendResult = {
-          status: 'queued_edge',
-          notification_id: notificationId,
-          external_id: notificationId,
-          warning: 'Backend dispatch deferred to queue',
-        };
+        return rejectDispatch('Notification origin is unavailable');
       }
     }
   }
@@ -324,7 +360,7 @@ const handleSend = async (c: any) => {
     ok: true,
     notification_id: notificationId,
     external_id: notificationId,
-    status: backendResult.status || 'queued',
+    status: backendResult.status || (isSynchronous ? 'sent' : 'queued'),
     timestamp: new Date().toISOString(),
     ...backendResult,
   };
@@ -418,7 +454,7 @@ app.post('/mcp', async (c) => {
         req: {
           path: '/v1/send',
           json: async () => args,
-          header: () => null,
+          header: (name: string) => c.req.header(name),
         },
         env: c.env,
         header: () => {},
@@ -483,6 +519,37 @@ app.get('/reports/delivery-summary', async (c) => {
   return c.json({ account: accountSlug, period_hours: hours, metrics: result.results || [] });
 });
 
+// ── 5.1 Fallback: Encaminhar rotas não tratadas na borda para a origem Django (Azure Core) ──
+app.all('*', async (c) => {
+  if (!c.env.BACKEND_ORIGIN) {
+    return c.json({ error: 'Backend origin not configured' }, 503);
+  }
+  const targetUrl = new URL(c.req.path + (new URL(c.req.url).search), c.env.BACKEND_ORIGIN);
+  const headers = new Headers(c.req.raw.headers);
+  headers.set('host', targetUrl.host);
+  headers.set('x-forwarded-host', c.req.header('host') || 'notify.supletivo.net.br');
+  headers.set('x-forwarded-proto', 'https');
+  const body = ['GET', 'HEAD'].includes(c.req.method) ? undefined : await c.req.raw.arrayBuffer();
+  try {
+    const res = await fetch(targetUrl.toString(), {
+      method: c.req.method,
+      headers,
+      body,
+      redirect: 'manual',
+    });
+    const responseHeaders = new Headers(res.headers);
+    responseHeaders.delete('content-encoding');
+    responseHeaders.delete('content-length');
+    return new Response(res.body, {
+      status: res.status,
+      statusText: res.statusText,
+      headers: responseHeaders,
+    });
+  } catch (err: any) {
+    return c.json({ error: 'Backend origin unavailable', detail: err.message }, 502);
+  }
+});
+
 // ── 6. Cloudflare Queue Consumer Handler (Workers Paid Enhanced) ───────────
 export const queueHandler = async (
   batch: MessageBatch<NotifyQueueMessage>,
@@ -493,7 +560,7 @@ export const queueHandler = async (
   if (batch.queue === 'notify-events-dlq') {
     const deadStatements: D1PreparedStatement[] = [];
     for (const msg of batch.messages) {
-      console.error(`[DLQ ALERT] Mensagem falhou definitivamente: ${msg.body.notification_id}`, msg.body);
+      console.error(`[DLQ ALERT] Notification failed: ${msg.body.notification_id}`);
       if (env.DB) {
         deadStatements.push(
           env.DB.prepare("UPDATE notifications SET status = 'dead_letter' WHERE id = ?")
@@ -510,7 +577,7 @@ export const queueHandler = async (
 
   // 2. Processamento da fila notify-events
   if (!env.BACKEND_ORIGIN) {
-    batch.ackAll();
+    batch.retryAll();
     return;
   }
 
@@ -529,7 +596,10 @@ export const queueHandler = async (
           'X-Account-Slug': item.account_slug,
         };
 
-        if (item.auth_header) {
+        if (env.NOTIFY_API_KEY) {
+          headers['Authorization'] = `Bearer ${env.NOTIFY_API_KEY}`;
+        } else if (item.auth_header) {
+          // Compatibility for messages accepted before credentials left the queue payload.
           headers['Authorization'] = item.auth_header;
         }
 
@@ -543,7 +613,7 @@ export const queueHandler = async (
 
         // Garante atribuição multi-tenant no corpo JSON para o auth do backend
         const dispatchPayload = {
-          ...item.payload,
+          ...originPayload(item.payload, targetPath, item.notification_id),
           account_id: item.payload?.account_id || item.account_slug,
         };
 
@@ -551,12 +621,13 @@ export const queueHandler = async (
           method: 'POST',
           headers,
           body: JSON.stringify(dispatchPayload),
+          signal: AbortSignal.timeout(10000),
         });
 
         if (resp.ok) {
           message.ack();
           successIds.push(item.notification_id);
-        } else if (resp.status === 429 || resp.status === 408 || resp.status >= 500) {
+        } else if ([401, 403, 404, 408, 429].includes(resp.status) || resp.status >= 500) {
           // Rate limiting (429), timeout (408) ou falha de servidor (5xx): reagenda na fila
           message.retry();
         } else {
@@ -605,9 +676,19 @@ export const scheduledHandler = async (
 };
 
 import { handleIncomingEmail } from './email-handler';
+import { routeAgentRequest } from 'agents';
+export { NotifyAgent } from './notify-agent';
 
 export default {
-  fetch: app.fetch,
+  fetch: async (request: Request, env: Env, ctx: ExecutionContext) => {
+    if (new URL(request.url).pathname.startsWith('/agents/')) {
+      const rejection = await authorize(request, env);
+      if (rejection) return rejection;
+    }
+    const agentRes = await routeAgentRequest(request, env);
+    if (agentRes) return agentRes;
+    return app.fetch(request, env, ctx);
+  },
   queue: queueHandler,
   email: handleIncomingEmail,
   scheduled: scheduledHandler,

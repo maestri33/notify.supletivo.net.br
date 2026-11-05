@@ -85,7 +85,7 @@ def test_test_mode_nunca_chama_ia(account):
 
 
 @pytest.mark.django_db
-@override_settings(TEST_MODE=False)
+@override_settings(TEST_MODE=False, AI_ADAPT_ENABLED=True)
 def test_liga_por_conta_e_por_env(account):
     account.ai_adapt = True
     assert adapt_mod.enabled_for(account) is True
@@ -110,11 +110,13 @@ class _FakeMailClient:
 
 
 @pytest.mark.django_db
-@override_settings(TEST_MODE=False)
+@override_settings(TEST_MODE=False, AI_ADAPT_ENABLED=True)
 def test_dispatch_envia_email_com_texto_adaptado(account, monkeypatch):
     from notify import dispatch as dispatch_mod
     from notify.models import Notification
 
+    account.ai_adapt = True
+    account.save(update_fields=["ai_adapt"])
     client = _FakeMailClient()
     monkeypatch.setattr(dispatch_mod, "_get_mail_client", lambda notif: client)
     monkeypatch.setattr(

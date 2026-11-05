@@ -197,7 +197,6 @@ def test_backend_idempotency_otp_cooldown_60s(test_account, open_number, monkeyp
 @pytest.mark.django_db
 def test_api_notify_fast_track_options(client, test_account, open_number, monkeypatch):
     """Testa endpoint POST /notify com opções de OTP ativadas."""
-    monkeypatch.setattr("notify.dispatch.dispatch", lambda *a, **kw: None)
 
     payload = {
         "content": "Código de login: 778899",

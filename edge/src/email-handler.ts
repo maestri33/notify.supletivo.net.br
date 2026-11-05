@@ -4,6 +4,7 @@
  */
 
 import PostalMime from 'postal-mime';
+import { triageWithJev } from './typesafe-triage';
 
 export interface EmailEnv {
   DB: D1Database;
@@ -13,6 +14,8 @@ export interface EmailEnv {
   NOTIFY_QUEUE?: Queue<any>;
   BACKEND_ORIGIN?: string;
   BACKEND_SERVICE_TOKEN?: string;
+  TYPESAFE_API_KEY?: string;
+  TYPESAFE_API_URL?: string;
 }
 
 export type EmailAttachmentMeta = {
@@ -32,16 +35,51 @@ export type AnalysisResult = {
     student_name?: string | null;
   };
   suggested_reply?: string;
+  legal_risk?: boolean;
+  urgency_level?: string;
 };
 
 /**
- * Analisa o conteúdo do email usando Cloudflare Workers AI
+ * Analisa o conteúdo do email usando TypeSafe AI (System One - Jev) com fallback para Workers AI
  */
 export async function analyzeEmailWithAI(
-  ai: any,
+  envOrAi: EmailEnv | any,
   subject: string,
   bodyText: string
 ): Promise<AnalysisResult> {
+  const env: Partial<EmailEnv> = envOrAi && (typeof envOrAi === 'object' && ('DB' in envOrAi || 'TYPESAFE_API_KEY' in envOrAi))
+    ? envOrAi
+    : { AI: envOrAi };
+
+  const combinedText = `Assunto: ${subject}\n\n${bodyText}`;
+
+  // 1. Tentar primeiro TypeSafe AI (System One Jev) para triagem rápida (<400ms) e tipada
+  if (env.TYPESAFE_API_KEY) {
+    try {
+      const jevTriage = await triageWithJev(combinedText, env.TYPESAFE_API_KEY, env.TYPESAFE_API_URL);
+      const intentMap: Record<string, AnalysisResult['intent']> = {
+        comercial: 'duvida_matricula',
+        secretaria: 'envio_documentos',
+        financeiro: 'comprovante_pagamento',
+        suporte: 'suporte',
+        ouvidoria: 'outro',
+      };
+
+      return {
+        intent: intentMap[jevTriage.department] || 'outro',
+        confidence: jevTriage.confidence,
+        summary: `[${jevTriage.department.toUpperCase()}] ${subject} (Urgência: ${jevTriage.urgency_level})`,
+        extracted_entities: {},
+        legal_risk: jevTriage.legal_risk,
+        urgency_level: jevTriage.urgency_level,
+        suggested_reply: 'Recebemos sua mensagem e encaminhamos para o setor responsável.',
+      };
+    } catch (e) {
+      console.warn('TypeSafe triage falhou, caindo para Workers AI:', e);
+    }
+  }
+
+  const ai = env.AI;
   if (!ai) {
     return {
       intent: 'outro',
@@ -169,8 +207,8 @@ export async function handleIncomingEmail(
     }
   }
 
-  // 4. Executar Análise Inteligente via Workers AI
-  const analysis = await analyzeEmailWithAI(env.AI, subject, bodyText);
+  // 4. Executar Análise Inteligente via TypeSafe AI ou Workers AI
+  const analysis = await analyzeEmailWithAI(env, subject, bodyText);
 
   // 5. Determinar Conta / Tenant (slug padrão 'supletivo' ou extraído do domínio)
   const accountSlug = 'supletivo';

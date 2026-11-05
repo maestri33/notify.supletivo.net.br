@@ -232,6 +232,7 @@ export function createMockEnv(overrides: Partial<Env> = {}): {
     ENVIRONMENT: 'test',
     BACKEND_ORIGIN: 'http://backend.internal:8000',
     BACKEND_SERVICE_TOKEN: 'test-cf-service-token',
+    NOTIFY_REQUIRE_AUTH: false,
     ...overrides,
   };
 

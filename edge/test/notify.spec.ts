@@ -7,6 +7,75 @@ describe('POST /notify & /v1/send routing and contracts', () => {
     vi.restoreAllMocks();
   });
 
+  it.each([
+    { caller: 'users.auth.otp' },
+    { run_sync: true },
+    { options: { run_sync: true } },
+  ])('returns synchronous provider failures without caching success or queueing fallback (%j)', async (syncOptions) => {
+    const { env, mockD1, mockQueue } = createMockEnv();
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      status: 'partial', external_id: 'origin-failed-id', code: 'delivery_unavailable',
+      channels: { whatsapp: 'failed', email: 'sent' },
+    }), { status: 503 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const body = JSON.stringify({ email: 'victormaestri@gmail.com', text: 'Teste unitario sem envio', external_id: 'sync-failure-key', ...syncOptions });
+    const options = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body };
+    const failureStatus = 'caller' in syncOptions ? 502 : 503;
+    const first = await app.request('/v1/send', options, env);
+    expect(first.status).toBe(failureStatus);
+    expect(await first.json()).toMatchObject({ ok: false, status: 'partial', channels: { email: 'sent', whatsapp: 'failed' } });
+    expect(mockQueue.sent).toHaveLength(0);
+    expect(mockD1.idempotency_keys.size).toBe(0);
+    const retry = await app.request('/v1/send', options, env);
+    expect(retry.status).toBe(failureStatus);
+    expect(retry.headers.get('X-Idempotent-Replay')).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(['/notify', '/v1/send'])('carries the same origin idempotency key when direct dispatch times out and falls back to Queue on %s', async (path) => {
+    const { env, mockQueue } = createMockEnv();
+    let directBody: any;
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init: any) => {
+      directBody = JSON.parse(init.body);
+      throw new Error('Response timed out');
+    }));
+    const response = await app.request(path, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'victormaestri@gmail.com', text: 'Teste unitario sem envio', content: 'Teste unitario sem envio' }),
+    }, env);
+    expect(response.status).toBe(202);
+    const queued = mockQueue.sent[0];
+    const key = (body: any) => path === '/notify' ? body.options.external_id : body.external_id;
+    expect(key(directBody)).toBe(queued.notification_id);
+    expect(key(queued.payload)).toBe(key(directBody));
+  });
+
+  it('fails without accepting a notification when the origin is unconfigured', async () => {
+    const { env, mockQueue } = createMockEnv({ BACKEND_ORIGIN: '' });
+    const result = await app.request('/v1/send', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'victormaestri@gmail.com', content: 'Teste unitario sem envio' }),
+    }, env);
+    expect(result.status).toBe(503);
+    expect((await result.json() as any).ok).toBe(false);
+    expect(mockQueue.sent).toHaveLength(0);
+  });
+
+  it('does not cache a false acceptance when Queue fails, allowing a successful retry', async () => {
+    const { env, mockQueue, mockD1 } = createMockEnv();
+    mockQueue.setShouldFail(true);
+    const body = JSON.stringify({ email: 'victormaestri@gmail.com', content: 'Teste unitario sem envio', enqueue: true, idempotency_key: 'queue-recovery' });
+    const options = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body };
+    const first = await app.request('/v1/send', options, env);
+    expect(first.status).toBe(503);
+    expect([...mockD1.notifications.values()].at(-1).status).toBe('failed');
+    mockQueue.setShouldFail(false);
+    const retry = await app.request('/v1/send', options, env);
+    expect(retry.status).toBe(202);
+    expect(retry.headers.get('X-Idempotent-Replay')).toBeNull();
+    expect(mockQueue.sent).toHaveLength(1);
+  });
+
   it('returns 400 when mandatory recipient or content fields are missing', async () => {
     const { env } = createMockEnv();
 

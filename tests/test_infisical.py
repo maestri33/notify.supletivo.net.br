@@ -10,7 +10,10 @@ from notify import infisical
 
 
 @pytest.fixture(autouse=True)
-def _reset_cache():
+def _reset_cache(settings):
+    settings.INFISICAL_BASE_URL = "https://vault.invalid"
+    settings.INFISICAL_PROJECT_ID = "configured-project"
+    settings.INFISICAL_ENVIRONMENT = "production"
     infisical._cache.clear()
     infisical._cache_expires_at = 0.0
     yield
@@ -19,10 +22,13 @@ def _reset_cache():
 
 
 def test_infisical_client_defaults():
-    client = infisical.InfisicalClient()
-    assert "10.0.1.61" in client.base_url
-    assert client.project_id == "1712fb45-2d75-4024-bc6b-0163d5e582a0"
-    assert client.environment == "dev"
+    with override_settings(INFISICAL_BASE_URL="", INFISICAL_PROJECT_ID="", INFISICAL_ENVIRONMENT="", ENVIRONMENT="", INFISICAL_CLIENT_ID="", INFISICAL_CLIENT_SECRET=""):
+        client = infisical.InfisicalClient()
+    assert client.base_url == ""
+    assert client.project_id == ""
+    assert client.environment == ""
+    assert client.client_id == ""
+    assert client.client_secret == ""
 
 
 def test_universal_auth_login_success(monkeypatch):

@@ -13,7 +13,8 @@ def test_e2e_completo_onboarding_e_dashboard(client: Client):
     # 1. Health
     r_health = client.get("/v1/health")
     assert r_health.status_code == 200
-    assert r_health.json()["status"] == "ok"
+    assert r_health.json()["status"] == "degraded"
+    assert r_health.json()["delivery_ready"] is False
 
     # 2. Criar nova conta pelo dashboard
     r_create = client.post(

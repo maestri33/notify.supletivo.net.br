@@ -392,6 +392,9 @@ def _account_from(request, args: dict | None = None):
 
     from django.conf import settings
 
+    if getattr(settings, "NOTIFY_REQUIRE_AUTH", True):
+        return None, "credencial de notificacao ausente ou invalida"
+
     from accounts.models import Account
 
     account_id = str((args or {}).get("account_id") or "").strip()

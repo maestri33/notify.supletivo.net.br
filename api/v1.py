@@ -12,7 +12,7 @@ from ninja.errors import HttpError
 from pydantic import ConfigDict, EmailStr
 
 from accounts.auth import api_key_auth
-from api.errors import ErrorOut
+from api.errors import DispatchErrorOut, ErrorOut, synchronous_dispatch_error
 
 logger = structlog.get_logger()
 router = Router(tags=["v1"])
@@ -44,10 +44,18 @@ def health(request):
         db_ok = True
     except Exception:
         db_ok = False
+    delivery = {"ready": False, "services": {}}
+    if db_ok:
+        from notify.health import delivery_snapshot
+        try:
+            delivery = delivery_snapshot()
+        except Exception:
+            pass
     return {
-        "status": "ok" if db_ok else "degraded",
+        "status": "ok" if db_ok and delivery["ready"] else "degraded",
         "version": getattr(settings, "APP_VERSION", "0.1.0-alpha.1"),
         "db": db_ok,
+        "delivery_ready": delivery["ready"],
     }
 
 
@@ -90,8 +98,14 @@ def ready(request, response=None):
         pass
 
     ready_ok = all(checks.values())
+    from notify.health import delivery_snapshot
+    try:
+        delivery = delivery_snapshot()
+    except Exception:
+        delivery = {"ready": False, "services": {}}
     return JsonResponse(
-        {"ready": ready_ok, "checks": checks, "services": services},
+        {"ready": ready_ok, "checks": checks, "services": services,
+         "delivery_ready": ready_ok and delivery["ready"], "delivery": delivery},
         status=200 if ready_ok else 503,
     )
 
@@ -173,7 +187,7 @@ class SendOut(Schema):
     external_id: str = Field(..., description="UUID da notificação enfileirada")
 
 
-@router.post("/send", response={200: SendOut, 400: ErrorOut, 403: ErrorOut}, summary="Envio legado com flags explícitas de canal")
+@router.post("/send", response={200: SendOut, 400: ErrorOut, 403: ErrorOut, 503: DispatchErrorOut}, summary="Envio legado com flags explícitas de canal")
 def api_send(request, payload: SendIn):
     account = api_key_auth(request, payload.account_id)
     from notify.ratelimit import check_rate
@@ -202,6 +216,12 @@ def api_send(request, payload: SendIn):
         run_sync=payload.run_sync,
         extra=payload.extra,
     )
+    error = synchronous_dispatch_error(
+        account, ext,
+        synchronous=payload.run_sync or payload.caller == "users.auth.otp" or bool((payload.extra or {}).get("is_otp")),
+    )
+    if error is not None:
+        return 503, error
     return {"external_id": ext}
 
 
@@ -227,7 +247,7 @@ class SendEventIn(Schema):
     channels_override: list[ChannelType] | None = None
 
 
-@router.post("/send-event", response={200: SendOut, 400: ErrorOut, 404: ErrorOut}, summary="Envio baseado em template cadastrado")
+@router.post("/send-event", response={200: SendOut, 400: ErrorOut, 404: ErrorOut, 503: DispatchErrorOut}, summary="Envio baseado em template cadastrado")
 def api_send_event(request, payload: SendEventIn):
     account = api_key_auth(request, payload.account_id)
     from notify.ratelimit import check_rate
@@ -256,6 +276,9 @@ def api_send_event(request, payload: SendEventIn):
     )
     if ext is None:
         raise HttpError(404, f"Evento '{payload.event}' não encontrado ou inativo.")
+    error = synchronous_dispatch_error(account, ext, synchronous=payload.run_sync or payload.event == "users.auth.otp")
+    if error is not None:
+        return 503, error
     return {"external_id": ext}
 
 

@@ -5,7 +5,8 @@ compatibility_flags = ["nodejs_compat"]
 workers_dev = true
 
 routes = [
-  { pattern = "notify.supletivo.net.br", custom_domain = true }
+  { pattern = "notify.supletivo.net.br", custom_domain = true },
+  { pattern = "notify.v7m.live", custom_domain = true }
 ]
 
 [vars]
@@ -59,4 +60,15 @@ head_sampling_rate = 1.0
 # ── Cloudflare Email Sending ────────────────────────────────
 [[send_email]]
 name = "EMAIL"
+
+# ── Cloudflare Agents SDK (Durable Objects com SQLite) ──────────
+[durable_objects]
+bindings = [
+  { name = "NotifyAgent", class_name = "NotifyAgent" }
+]
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["NotifyAgent"]
+
 

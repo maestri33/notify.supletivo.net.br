@@ -115,7 +115,6 @@ def send(
         wa_number = (
             WhatsAppNumber.objects.filter(account=account, connection_status="open", is_default=True).first()
             or WhatsAppNumber.objects.filter(account=account, connection_status="open").first()
-            or WhatsAppNumber.objects.filter(connection_status="open").first()
             or WhatsAppNumber.objects.filter(account=account, is_default=True).first()
             or WhatsAppNumber.objects.filter(account=account).first()
         )

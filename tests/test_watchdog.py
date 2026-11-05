@@ -19,9 +19,18 @@ from notify.models import ServiceStatus
 pytestmark = pytest.mark.django_db
 
 
+@pytest.fixture(autouse=True)
+def offline_status(monkeypatch):
+    class Response:
+        status_code = 200
+        def json(self):
+            return {"data": {"Connected": False, "LoggedIn": False}}
+    monkeypatch.setattr(watchdog.httpx, "get", lambda *a, **kw: Response())
+
+
 @pytest.fixture
 def checks_ok(monkeypatch):
-    monkeypatch.setattr(watchdog, "_check_go", lambda heal=True: (True, "logadas: default"))
+    monkeypatch.setattr(watchdog, "_check_go", lambda **kwargs: (True, "logadas: default"))
     monkeypatch.setattr(watchdog, "_check_mailcow", lambda: (True, "7 domínio(s)"))
     monkeypatch.setattr(watchdog, "_check_omnirouter", lambda: (True, "gateway de pé"))
     monkeypatch.setattr(watchdog, "_check_queue", lambda: (True, "0 na fila"))
@@ -73,12 +82,12 @@ def test_auto_heal_reconecta_com_cooldown(monkeypatch):
     watchdog._heal_go("http://go.test", {"staging": "tok1"})
     assert len(reconectadas) == 1
 
-    # cooldown vencido → tenta de novo
+    # Time passing alone must not reconnect repeatedly during an outage.
     row = ServiceStatus.objects.get(name="evolution-go")
     row.heal_attempted_at = timezone.now() - timezone.timedelta(minutes=11)
     row.save()
     watchdog._heal_go("http://go.test", {"staging": "tok1"})
-    assert len(reconectadas) == 2
+    assert len(reconectadas) == 1
 
 
 def test_heal_go_assina_vocabulario_do_go(monkeypatch):
@@ -109,6 +118,7 @@ def test_go_reconecta_cada_instancia_registrada_que_estiver_fora(
     from channels.models import WhatsAppNumber
 
     settings.EVOLUTION_GO_BASE_URL = "http://go.test"
+    settings.WATCHDOG_AUTO_HEAL_ENABLED = True
     WhatsAppNumber.objects.create(
         account=account,
         slug="principal",
@@ -166,7 +176,7 @@ def test_heal_go_executa_forcereconnect_quando_sessao_zumbi(monkeypatch, setting
                 {
                     "id": "uuid-1234-5678",
                     "name": "default",
-                    "jid": "5511999999999:15@s.whatsapp.net",
+                    "jid": "5543996648750:15@s.whatsapp.net",
                     "connected": False,
                 }
             ])
@@ -189,11 +199,12 @@ def test_heal_go_executa_forcereconnect_quando_sessao_zumbi(monkeypatch, setting
     assert any(p[0].endswith("/instance/connect") for p in posts)
     force_call = next((p for p in posts if "/instance/forcereconnect/uuid-1234-5678" in p[0]), None)
     assert force_call is not None
-    assert force_call[1] == {"number": "5511999999999"}
+    assert force_call[1] == {"number": "5543996648750"}
     assert force_call[2].get("apikey") == "admin-secret"
 
 
 def test_canario_ok_registra_sucesso(account, alerts, monkeypatch, settings):
+    settings.CANARY_ENABLED = True
     settings.NOTIFY_DEFAULT_ACCOUNT_SLUG = account.slug
     settings.CANARY_PHONE = "5543996648750"
     settings.CANARY_EMAIL = ""
@@ -204,6 +215,7 @@ def test_canario_ok_registra_sucesso(account, alerts, monkeypatch, settings):
 
 
 def test_canario_falho_alerta(account, alerts, monkeypatch, settings):
+    settings.CANARY_ENABLED = True
     settings.NOTIFY_DEFAULT_ACCOUNT_SLUG = account.slug
     settings.CANARY_PHONE = "5543996648750"
     settings.CANARY_EMAIL = ""
@@ -218,6 +230,7 @@ def test_canario_falho_alerta(account, alerts, monkeypatch, settings):
 
 
 def test_canario_sem_destino_nao_roda(account, alerts, settings):
+    settings.CANARY_ENABLED = True
     settings.CANARY_PHONE = ""
     settings.CANARY_EMAIL = ""
     assert watchdog.canary() is None

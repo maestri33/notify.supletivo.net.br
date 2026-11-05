@@ -19,4 +19,4 @@ USER notify
 
 EXPOSE 8000
 
-CMD ["gunicorn", "notify_server.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "2", "--access-logfile", "-"]
+CMD ["gunicorn", "notify_server.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "1", "--threads", "4", "--access-logfile", "-"]

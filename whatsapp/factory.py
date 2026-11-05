@@ -108,6 +108,8 @@ def get_active_evolution_pool(account=None) -> list:
                 seen_ids.add(num.id)
                 pool.append(num)
 
+    if account is not None:
+        return pool
     global_numbers = list(
         WhatsAppNumber.objects.filter(connection_status="open")
         .exclude(id__in=seen_ids)
@@ -128,7 +130,12 @@ def get_otp_whatsapp_driver(notif=None, *, timeout: float = 3.0) -> WhatsAppDriv
     if not pool:
         wa_number = getattr(notif, "whatsapp_number", None) or getattr(notif, "wa_number", None)
         if wa_number:
+            if account is not None and wa_number.account_id != account.id:
+                raise ValueError("WhatsApp number belongs to a different account")
             return EvolutionGoDriver(api_key=wa_number.go_api_key(), timeout=timeout)
+        if account is not None:
+            from whatsapp.errors import WhatsAppSessionDown
+            raise WhatsAppSessionDown(503, "No WhatsApp number configured for account")
         return EvolutionGoDriver(timeout=timeout)
 
     if len(pool) == 1:

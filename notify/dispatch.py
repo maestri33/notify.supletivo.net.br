@@ -36,14 +36,27 @@ class TransientDispatchError(Exception):
     """
 
 
+class DispatchFailedError(Exception):
+    """A persisted channel failed; the queue task must not report success."""
+
+
+def _raise_failed_channels(notif: Notification, sync: bool) -> None:
+    failed = [channel for channel in ("whatsapp", "email", "sms")
+              if getattr(notif, f"{channel}_status") == STATUS_FAILED]
+    if failed and not sync:
+        raise DispatchFailedError(f"Notification {notif.external_id}: failed channels {failed}")
+
+
 def _is_transient(exc: Exception) -> bool:
     """Erro que vale re-tentar: infraestrutura fora, não resposta de negócio."""
     import httpx
 
-    from whatsapp.errors import WhatsAppSessionDown
+    from whatsapp.errors import WhatsAppSessionDown, WhatsAppTransportError
 
     if isinstance(exc, WhatsAppSessionDown):
         return True
+    if isinstance(exc, WhatsAppTransportError):
+        return exc.status_code in (0, 408, 429) or exc.status_code >= 500
     if isinstance(exc, (httpx.TimeoutException, httpx.TransportError)):
         return True
     try:
@@ -98,18 +111,20 @@ def _get_whatsapp_driver(notif: Notification, *, feature: str | None = None):
 
     if notif.whatsapp_number_id:
         wn = notif.whatsapp_number
+        if wn and wn.account_id != notif.account_id:
+            raise ValueError("WhatsApp number belongs to a different account")
         if wn and wn.connection_status == "open":
             return get_driver(wn, feature=feature)
 
     open_wn = (
-        WhatsAppNumber.objects.filter(account=notif.account, connection_status="open").first()
-        or WhatsAppNumber.objects.filter(connection_status="open").first()
+        WhatsAppNumber.objects.filter(account=notif.account, connection_status="open").order_by("-is_default", "id").first()
     )
     if open_wn:
         return get_driver(open_wn, feature=feature)
     if notif.whatsapp_number_id and notif.whatsapp_number:
         return get_driver(notif.whatsapp_number, feature=feature)
-    return get_driver(feature=feature)
+    from whatsapp.errors import WhatsAppSessionDown
+    raise WhatsAppSessionDown(503, "No WhatsApp number configured for account")
 
 
 def _get_mail_client(notif: Notification):
@@ -160,10 +175,9 @@ def dispatch(notification_id: int, sync: bool = False) -> None:
             external_id=str(notif.external_id), account=notif.account.slug
         )
 
-        notif.attempts += 1
-
         # TEST_MODE: dry-run
         if settings.TEST_MODE:
+            notif.attempts += 1
             if notif.whatsapp_status == STATUS_PENDING:
                 notif.whatsapp_status = STATUS_SENT
             if notif.email_status == STATUS_PENDING:
@@ -201,15 +215,19 @@ def dispatch(notification_id: int, sync: bool = False) -> None:
             )
 
         if not (do_whatsapp or do_email or do_sms):
-            notif.save(update_fields=["attempts"])
+            _raise_failed_channels(notif, sync)
             return
 
+        notif.attempts += 1
         if do_whatsapp:
             notif.whatsapp_status = STATUS_SENDING
+            notif.whatsapp_error = None
         if do_email:
             notif.email_status = STATUS_SENDING
+            notif.email_error = None
         if do_sms:
             notif.sms_status = STATUS_SENDING
+            notif.sms_error = None
         notif.save()
 
     # ── FASE 1.4: Áudio da origem -> Transcrição STT via OmniRouter (fail-open) ─
@@ -220,7 +238,7 @@ def dispatch(notification_id: int, sync: bool = False) -> None:
             or str(notif.media_url).lower().split("?")[0].endswith((".mp3", ".ogg", ".wav", ".m4a", ".opus", ".aac"))
         )
     )
-    if is_audio_media and (not getattr(settings, "TEST_MODE", False)):
+    if is_audio_media and getattr(settings, "AI_TRANSCRIBE_OUTBOUND_ENABLED", False) and not settings.TEST_MODE:
         try:
             from ai.client import transcribe
             audio_bytes = b""
@@ -349,17 +367,17 @@ def dispatch(notification_id: int, sync: bool = False) -> None:
             else:
                 _send_whatsapp_text(notif)
         finally:
-            from django.db import close_old_connections
+            from django.db import connections
 
-            close_old_connections()
+            connections.close_all()
 
     def _job_email() -> None:
         try:
             _send_email(notif)
         finally:
-            from django.db import close_old_connections
+            from django.db import connections
 
-            close_old_connections()
+            connections.close_all()
 
     def _job_sms() -> None:
         try:
@@ -367,26 +385,34 @@ def dispatch(notification_id: int, sync: bool = False) -> None:
 
             channels_registry.send("sms", notif)
         finally:
-            from django.db import close_old_connections
+            from django.db import connections
 
-            close_old_connections()
+            connections.close_all()
+
+    def _run_channel(channel: str, job) -> None:
+        try:
+            job()
+        except Exception as exc:
+            setattr(notif, f"{channel}_status", STATUS_FAILED)
+            setattr(notif, f"{channel}_error", f"{type(exc).__name__}: {exc}")
+            setattr(notif, f"_transient_{'wa' if channel == 'whatsapp' else channel}", _is_transient(exc))
 
     jobs = []
     if do_whatsapp:
-        jobs.append(_job_whatsapp)
+        jobs.append(("whatsapp", _job_whatsapp))
     if do_email:
-        jobs.append(_job_email)
+        jobs.append(("email", _job_email))
     if do_sms:
-        jobs.append(_job_sms)
+        jobs.append(("sms", _job_sms))
 
     if len(jobs) <= 1:
-        for job in jobs:
-            job()
+        for channel, job in jobs:
+            _run_channel(channel, job)
     else:
         from concurrent.futures import ThreadPoolExecutor
 
         with ThreadPoolExecutor(max_workers=len(jobs)) as pool:
-            futures = [pool.submit(job) for job in jobs]
+            futures = [pool.submit(_run_channel, channel, job) for channel, job in jobs]
         for future in futures:
             exc = future.exception()
             if exc is not None:  # senders capturam tudo; isto é cinto de segurança
@@ -407,6 +433,9 @@ def dispatch(notification_id: int, sync: bool = False) -> None:
         if notif.email_status == STATUS_FAILED and getattr(notif, "_transient_email", False):
             notif.email_status = STATUS_PENDING
             retry_channels.append("email")
+        if notif.sms_status == STATUS_FAILED and getattr(notif, "_transient_sms", False):
+            notif.sms_status = STATUS_PENDING
+            retry_channels.append("sms")
 
     with transaction.atomic():
         notif.save(
@@ -444,6 +473,7 @@ def dispatch(notification_id: int, sync: bool = False) -> None:
             f"canais {retry_channels} com falha transitória — "
             f"tentativa {notif.attempts}/{_max_attempts()}, Django-Q reagenda"
         )
+    _raise_failed_channels(notif, sync)
 
 
 def _record_provider(notif: Notification, driver, result) -> None:

@@ -39,7 +39,8 @@ def test_bounce_vira_supressao_e_nao_insiste(account, _real, monkeypatch):
     monkeypatch.setattr(dispatch_mod, "_get_mail_client", lambda n: _C())
 
     n1 = _email_notif(account)
-    dispatch_mod.dispatch(n1.id)
+    with pytest.raises(dispatch_mod.DispatchFailedError):
+        dispatch_mod.dispatch(n1.id)
     n1.refresh_from_db()
     assert n1.email_status == "failed"
     assert SuppressedEmail.objects.filter(account=account, email="victormaestri@gmail.com").exists()

@@ -1013,13 +1013,60 @@ def omnirouter_test(request):
 
 
 def services_status(request):
-    """Status dos serviços integrados."""
-    omni_url = getattr(settings, "OMNIROUTER_URL", "http://10.0.1.35")
+    """Status dinâmico dos serviços integrados."""
+    import httpx
+    from django.db import connections
+
+    # 1. Postgres
+    try:
+        with connections["default"].cursor() as c:
+            c.execute("SELECT 1")
+        pg_ok, pg_detail = True, "Conectado"
+    except Exception as e:
+        pg_ok, pg_detail = False, str(e)[:30]
+
+    # 2. Evolution GO
+    evo_url = (getattr(settings, "EVOLUTION_GO_BASE_URL", "") or "http://evolution-go:4000").rstrip("/")
+    evo_key = getattr(settings, "EVOLUTION_GO_API_KEY", "") or getattr(settings, "EVOLUTION_GO_ADMIN_KEY", "")
+    try:
+        resp = httpx.get(f"{evo_url}/instance/fetchInstances", headers={"apikey": evo_key}, timeout=1.5)
+        if resp.status_code < 400:
+            evo_ok, evo_detail = True, "Conectado"
+        elif resp.status_code == 503:
+            evo_ok, evo_detail = False, "HTTP 503 (Sem licença/aguardando)"
+        else:
+            evo_ok, evo_detail = False, f"HTTP {resp.status_code}"
+    except Exception:
+        try:
+            resp = httpx.get(evo_url, timeout=1.0)
+            evo_ok, evo_detail = (resp.status_code < 500), f"HTTP {resp.status_code}"
+        except Exception:
+            evo_ok, evo_detail = False, "Desconectado"
+
+    # 3. Stalwart Mail
+    stalwart_url = (getattr(settings, "STALWART_BASE_URL", "") or "http://stalwart:8080").rstrip("/")
+    try:
+        resp = httpx.get(f"{stalwart_url}/jmap/session", timeout=1.5)
+        if resp.status_code in (200, 401):
+            st_ok, st_detail = True, "Conectado"
+        else:
+            st_ok, st_detail = False, f"HTTP {resp.status_code}"
+    except Exception:
+        st_ok, st_detail = False, "Desconectado"
+
+    # 4. OmniRouter
+    omni_url = getattr(settings, "OMNIROUTER_URL", "https://ai.v7m.live").rstrip("/")
+    try:
+        resp = httpx.get(f"{omni_url}/health", timeout=1.5)
+        omni_ok, omni_detail = (resp.status_code < 400), ("Conectado" if resp.status_code < 400 else f"HTTP {resp.status_code}")
+    except Exception:
+        omni_ok, omni_detail = False, "Desconectado"
+
     servicos = [
-        {"name": "Evolution GO", "ok": False, "detail": "HTTP 503", "url": "http://evolution-go:4000"},
-        {"name": "Stalwart Mail", "ok": False, "detail": "Desconectado", "url": "http://10.0.1.20:8080"},
-        {"name": "OmniRouter", "ok": False, "detail": "Desconectado", "url": omni_url},
-        {"name": "Postgres", "ok": True, "detail": "Conectado", "url": "localhost:5432"},
+        {"name": "Evolution GO", "ok": evo_ok, "detail": evo_detail, "url": evo_url},
+        {"name": "Stalwart Mail", "ok": st_ok, "detail": st_detail, "url": stalwart_url},
+        {"name": "OmniRouter", "ok": omni_ok, "detail": omni_detail, "url": omni_url},
+        {"name": "Postgres", "ok": pg_ok, "detail": pg_detail, "url": "localhost:5432"},
     ]
     return render(request, "dashboard/_services_status.html", {"rows": servicos})
 
