@@ -608,6 +608,17 @@
         <a href="/docs" target="_blank" style="color:var(--tx-muted);display:flex;align-items:center;gap:4px">
           <svg class="ico"><use href="#i-sparkles"></use></svg> API Docs
         </a>
+        <a href="/admin/" target="_blank" style="color:var(--tx-muted);display:flex;align-items:center;gap:4px">
+          <svg class="ico"><use href="#i-shield"></use></svg> Admin
+        </a>
+        {% if request.user.is_authenticated %}
+        <span class="muted" style="font-size:11.5px;display:flex;align-items:center;gap:4px">
+          👤 {{ request.user.username }}
+        </span>
+        <a href="/admin/logout/" style="color:var(--tx-muted);display:flex;align-items:center;gap:4px" title="Sair da sessão">
+          <svg class="ico-sm"><use href="#i-x"></use></svg> Sair
+        </a>
+        {% endif %}
       </div>
     </header>
 

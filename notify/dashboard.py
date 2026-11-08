@@ -513,7 +513,7 @@ def qr_code(request, slug: str):
             return HttpResponse(_flash("Evolution GO respondeu 503 (licença necessária)", "warn"))
         data = resp.json() if resp.status_code < 400 else {}
         inner = data.get("data") if isinstance(data.get("data"), dict) else data
-        imagem = str((inner or {}).get("qrcode") or (inner or {}).get("QRCode") or "")
+        imagem = str((inner or {}).get("qrcode") or (inner or {}).get("QRCode") or (inner or {}).get("Qrcode") or "")
         if imagem:
             if not imagem.startswith("data:"):
                 imagem = "data:image/png;base64," + imagem

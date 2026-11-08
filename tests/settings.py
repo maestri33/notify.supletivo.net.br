@@ -13,6 +13,7 @@ DATABASES = {
 
 TEST_MODE = True
 NOTIFY_REQUIRE_AUTH = False  # Explicitly exercise the legacy private-network contract.
+NOTIFY_DASHBOARD_REQUIRE_ADMIN = False  # Default desabilitado na suite geral; testado isoladamente.
 
 # Sem chave, `mail.crypto` devolve o texto como veio (comportamento de dev) e o
 # teste que verifica "a senha foi guardada cifrada" passava a comparar plaintext

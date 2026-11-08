@@ -67,6 +67,10 @@ for (const path of ['/notify', '/v1/send', '/mcp', '/reports/*']) {
 
 // ── 0. Root Service Info ───────────────────────────────────────────────────
 app.get('/', (c) => {
+  const accept = c.req.header('Accept') || '';
+  if (accept.includes('text/html')) {
+    return c.redirect('/dashboard/');
+  }
   return c.json({
     service: 'notify-edge',
     status: 'ok',

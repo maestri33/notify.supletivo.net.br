@@ -56,6 +56,14 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    "notify_server.middleware.DashboardAdminRequiredMiddleware",
+]
+
+LOGIN_URL = "/admin/login/"
+
+AUTHENTICATION_BACKENDS = [
+    "accounts.auth_backend.EmailOrUsernameModelBackend",
+    "django.contrib.auth.backends.ModelBackend",
 ]
 
 ROOT_URLCONF = "notify_server.urls"
@@ -219,6 +227,7 @@ FERNET_KEY = env("FERNET_KEY", default="")
 NOTIFY_DEFAULT_ACCOUNT_SLUG = env("NOTIFY_DEFAULT_ACCOUNT_SLUG", default="default")
 NOTIFY_DEFAULT_ACCOUNT_NAME = env("NOTIFY_DEFAULT_ACCOUNT_NAME", default="Notify")
 NOTIFY_REQUIRE_AUTH = env.bool("NOTIFY_REQUIRE_AUTH", default=True)
+NOTIFY_DASHBOARD_REQUIRE_ADMIN = env.bool("NOTIFY_DASHBOARD_REQUIRE_ADMIN", default=True)
 
 # ── Watchdog / alertas / canário (Q1-Q3, K1, J3) ────────────────────────────
 # Alertas do admin saem DIRETO pela instância default da GO + e-mail da conta
