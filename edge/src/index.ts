@@ -321,7 +321,7 @@ const handleSend = async (c: any) => {
         }
         // Se for OTP, falha imediatamente com 502 para acionar retry no chamador
         if (isSynchronous) {
-          const details = await resp.json().catch(() => ({}));
+          const details = (await resp.json().catch(() => ({}))) as Record<string, any>;
           return rejectDispatch(isOtp ? 'OTP dispatch failed at backend origin' : 'Synchronous dispatch failed at backend origin', isOtp ? 502 : 503, details);
         }
 
