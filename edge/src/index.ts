@@ -65,6 +65,27 @@ for (const path of ['/notify', '/v1/send', '/mcp', '/reports/*']) {
   });
 }
 
+// ── 0.1 Gate de Borda para Rotas Administrativas (/v1/admin/*) ────────────
+app.use('/v1/admin/*', async (c, next) => {
+  if (c.req.method === 'OPTIONS') return next();
+  const cfClientId = c.req.header('CF-Access-Client-Id');
+  const cfClientSecret = c.req.header('CF-Access-Client-Secret');
+  const adminSecret = c.env.BACKEND_SERVICE_TOKEN || c.env.NOTIFY_API_KEY;
+  const authHeader = c.req.header('Authorization') || '';
+
+  // 1. Autorização via Cloudflare Service Token (m2m / Zero Trust)
+  if (cfClientId && cfClientSecret) {
+    return next();
+  }
+
+  // 2. Autorização via Bearer com token master de administração/infraestrutura
+  if (adminSecret && authHeader === `Bearer ${adminSecret}`) {
+    return next();
+  }
+
+  return c.json({ error: 'Acesso restrito ao administrador de infraestrutura.' }, 403);
+});
+
 // ── 0. Root Service Info ───────────────────────────────────────────────────
 app.get('/', (c) => {
   const accept = c.req.header('Accept') || '';
@@ -122,8 +143,8 @@ app.get('/health', async (c) => {
 app.get('/media', (c) => c.text('Key required', 400));
 app.get('/media/*', async (c) => {
   const key = c.req.path.replace(/^\/media\/?/, '');
-  if (!key) {
-    return c.text('Key required', 400);
+  if (!key || key.includes('..') || key.startsWith('/')) {
+    return c.text('Key required or invalid', 400);
   }
 
   if (!c.env.MEDIA) return c.json({ error: 'R2 media bucket not bound' }, 503);
