@@ -17,262 +17,152 @@ export type NotifyQueueMessage = {
 export type Env = {
   DB: D1Database;
   MEDIA: R2Bucket;
-  AI?: any;
+  AI: any;
   HYPERDRIVE?: any;
-  NOTIFY_QUEUE?: Queue<any>;
-  EMAIL?: any;
+  NOTIFY_QUEUE?: Queue<NotifyQueueMessage>;
   ENVIRONMENT: string;
-  EVOLUTION_URL?: string;
-  EVOLUTION_API_KEY?: string;
-  BACKEND_ORIGIN?: string;
+  BACKEND_ORIGIN: string;
   BACKEND_SERVICE_TOKEN?: string;
   NOTIFY_API_KEY?: string;
   NOTIFY_REQUIRE_AUTH?: string | boolean;
-  CF_ACCOUNT_ID?: string;
-  CF_API_TOKEN?: string;
 };
 
 export const app = new Hono<{ Bindings: Env }>();
+
 app.use('*', cors());
 
-// ── Utilitários de Hash e Autenticação ─────────────────────────────────────────
-
-async function sha256(text: string): Promise<string> {
-  const enc = new TextEncoder().encode(text);
-  const buf = await crypto.subtle.digest('SHA-256', enc);
-  return Array.from(new Uint8Array(buf))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
-}
-
-// Resolve conta ativa pelo Bearer token ou fallback para conta default
-async function resolveAccount(req: Request, env: Env): Promise<{ id: string; slug: string; name: string; webhook_url?: string; webhook_secret?: string } | null> {
-  const authHeader = req.headers.get('Authorization') || '';
-  if (authHeader.startsWith('Bearer ')) {
-    const rawToken = authHeader.slice(7).trim();
-    const tokenHash = await sha256(rawToken);
-    const row: any = await env.DB.prepare(
-      `SELECT a.id, a.slug, a.name, a.webhook_url, a.webhook_secret
-       FROM api_keys k
-       JOIN accounts a ON a.id = k.account_id
-       WHERE k.key_hash = ? AND k.is_active = 1 AND a.is_active = 1`
-    ).bind(tokenHash).first();
-    if (row) return row;
-  }
-
-  // Fallback para conta padrão
-  const defaultRow: any = await env.DB.prepare(
-    `SELECT id, slug, name, webhook_url, webhook_secret
-     FROM accounts
-     WHERE slug = 'default' AND is_active = 1`
-  ).first();
-
-  return defaultRow || null;
-}
-
-// ── Normalização de Telefone Brasileiro (DDI 55) ──────────────────────────────
-
-function normalizeBrPhone(phone: string): string {
-  const digits = String(phone).replace(/\D/g, '');
-  if (!digits.startsWith('55') || (digits.length !== 12 && digits.length !== 13)) {
-    return digits;
-  }
-  const ddd = digits.slice(2, 4);
-  const rest = digits.slice(4);
-  if (rest.length === 9 && rest.startsWith('9')) {
-    return digits;
-  }
-  if (rest.length === 8) {
-    return `55${ddd}9${rest}`;
-  }
-  return digits;
-}
-
-// ── Envio de E-mail via Cloudflare Email Sending REST API ─────────────────────
-
-async function sendCloudflareEmail(
-  env: Env,
-  params: {
-    to: string;
-    subject: string;
-    html: string;
-    fromAddress?: string;
-    fromName?: string;
-  }
-): Promise<{ success: boolean; messageId?: string; error?: string }> {
-  const accountId = env.CF_ACCOUNT_ID || 'e0814c592e43284a2f6f9984bef32631';
-  const fromAddr = params.fromAddress || 'contato@supletivo.net.br';
-  const fromName = params.fromName || 'Supletivo Brasil';
-
-  if (env.EMAIL && typeof env.EMAIL.send === 'function') {
-    try {
-      await env.EMAIL.send({
-        from: `${fromName} <${fromAddr}>`,
-        to: params.to,
-        subject: params.subject,
-        html: params.html,
-      });
-      return { success: true, messageId: `cf-${Date.now()}` };
-    } catch (e: any) {
-      // Fallback para REST API
-    }
-  }
-
-  if (env.CF_API_TOKEN) {
-    try {
-      const resp = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}/email/sending/send`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${env.CF_API_TOKEN}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          from: { address: fromAddr, name: fromName },
-          to: [params.to],
-          subject: params.subject,
-          html: params.html,
-        }),
-      });
-      const data: any = await resp.json();
-      if (resp.ok && data.success) {
-        return { success: true, messageId: data.result?.message_id };
-      }
-      return { success: false, error: data.errors?.[0]?.message || 'Email sending failed' };
-    } catch (err: any) {
-      return { success: false, error: err.message };
-    }
-  }
-
-  return { success: true, messageId: `mock-${Date.now()}` };
-}
-
-// ── Envio de WhatsApp via Evolution Go ────────────────────────────────────────
-
-async function sendEvolutionWhatsApp(
-  env: Env,
-  params: {
-    number: string;
-    text: string;
-    instanceName?: string;
-    options?: any;
-  }
-): Promise<{ success: boolean; messageId?: string; error?: string }> {
-  const baseUrl = (env.EVOLUTION_URL || 'https://evolution.supletivo.net.br').replace(/\/$/, '');
-  const apiKey = env.EVOLUTION_API_KEY || '';
-  const normalizedNumber = normalizeBrPhone(params.number);
-
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-  };
-  if (apiKey) {
-    headers['apikey'] = apiKey;
-  }
-
-  try {
-    let endpoint = '/send/text';
-    let body: any = {
-      number: normalizedNumber,
-      text: params.text,
+function originPayload(payload: Record<string, any>, targetPath: string, notificationId: string) {
+  const result = { ...payload };
+  if (targetPath === '/notify') {
+    result.options = {
+      ...payload.options,
+      external_id: payload.options?.external_id || payload.external_id || payload.idempotency_key || notificationId,
     };
-
-    const opt = params.options || {};
-    if (opt.poll) {
-      endpoint = '/send/poll';
-      body = {
-        number: normalizedNumber,
-        question: opt.poll.question,
-        options: opt.poll.options,
-        maxAnswer: opt.poll.selectable_count || 1,
-        selectableCount: opt.poll.selectable_count || 1,
-      };
-    } else if (opt.location) {
-      endpoint = '/send/location';
-      body = {
-        number: normalizedNumber,
-        latitude: opt.location.latitude,
-        longitude: opt.location.longitude,
-        name: opt.location.name || 'Localização',
-        address: opt.location.address || '—',
-      };
-    } else if (opt.media_url) {
-      endpoint = '/send/media';
-      body = {
-        number: normalizedNumber,
-        url: opt.media_url,
-        type: opt.media_type || 'document',
-        caption: params.text,
-      };
-    }
-
-    if (!apiKey && env.BACKEND_ORIGIN) {
-      const resp = await fetch(`${env.BACKEND_ORIGIN}/notify`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          whatsapp: normalizedNumber,
-          content: params.text,
-          options: opt,
-          run_sync: true,
-        }),
-      });
-      const data: any = await resp.json().catch(() => ({}));
-      return { success: resp.ok, messageId: data.external_id || `wa-${Date.now()}` };
-    }
-
-    const resp = await fetch(`${baseUrl}${endpoint}`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
-    });
-
-    const data: any = await resp.json().catch(() => ({}));
-    if (resp.ok) {
-      const msgId = data?.data?.Info?.ID || data?.result?.id || `wa-${Date.now()}`;
-      return { success: true, messageId: msgId };
-    }
-    return { success: false, error: data?.error || `HTTP ${resp.status}` };
-  } catch (err: any) {
-    return { success: false, error: err.message };
+  } else {
+    result.external_id = payload.external_id || payload.options?.external_id || payload.idempotency_key || notificationId;
   }
+  return result;
 }
 
-// ── Rotas HTTP (Hono) ─────────────────────────────────────────────────────────
+async function authorize(request: Request, env: Env): Promise<Response | null> {
+  if (env.NOTIFY_REQUIRE_AUTH === false || env.NOTIFY_REQUIRE_AUTH === 'false') return null;
+  if (!env.NOTIFY_API_KEY) return Response.json({ error: 'Notification authentication is not configured' }, { status: 503 });
+  const token = request.headers.get('Authorization') || '';
+  const expected = `Bearer ${env.NOTIFY_API_KEY}`;
+  const encoder = new TextEncoder();
+  const [receivedHash, expectedHash] = await Promise.all([token, expected].map(async (value) =>
+    new Uint8Array(await crypto.subtle.digest('SHA-256', encoder.encode(value)))));
+  let mismatch = 0;
+  for (let i = 0; i < receivedHash.length; i++) mismatch |= receivedHash[i] ^ expectedHash[i];
+  return mismatch === 0 ? null : Response.json({ error: 'Unauthorized' }, { status: 401 });
+}
 
+for (const path of ['/notify', '/v1/send', '/mcp', '/reports/*']) {
+  app.use(path, async (c, next) => {
+    if (c.req.method === 'OPTIONS') return next();
+    const rejection = await authorize(c.req.raw, c.env);
+    return rejection || next();
+  });
+}
+
+// ── 0.1 Gate de Borda para Rotas Administrativas (/v1/admin/*) ────────────
+app.use('/v1/admin/*', async (c, next) => {
+  if (c.req.method === 'OPTIONS') return next();
+  const cfClientId = c.req.header('CF-Access-Client-Id');
+  const cfClientSecret = c.req.header('CF-Access-Client-Secret');
+  const adminSecret = c.env.BACKEND_SERVICE_TOKEN || c.env.NOTIFY_API_KEY;
+  const authHeader = c.req.header('Authorization') || '';
+
+  // 1. Autorização via Cloudflare Service Token (m2m / Zero Trust)
+  if (cfClientId && cfClientSecret) {
+    return next();
+  }
+
+  // 2. Autorização via Bearer com token master de administração/infraestrutura
+  if (adminSecret && authHeader === `Bearer ${adminSecret}`) {
+    return next();
+  }
+
+  return c.json({ error: 'Acesso restrito ao administrador de infraestrutura.' }, 403);
+});
+
+// ── 0. Root Service Info ───────────────────────────────────────────────────
 app.get('/', (c) => {
+  const accept = c.req.header('Accept') || '';
+  if (accept.includes('text/html')) {
+    return c.redirect('/dashboard/');
+  }
   return c.json({
     service: 'notify-edge',
     status: 'ok',
-    version: '1.0.0-serverless',
-    engine: 'Cloudflare Workers Paid ($5/mês)',
-    docs: 'https://notify.supletivo.net.br',
-  });
-});
-
-app.get('/health', async (c) => {
-  let d1Status = 'ok';
-  try {
-    const row = await c.env.DB.prepare('SELECT 1 as alive').first();
-    if (row?.alive !== 1) d1Status = 'error';
-  } catch (err: any) {
-    d1Status = `error: ${err.message}`;
-  }
-
-  return c.json({
-    status: 'ok',
-    checks: {
-      d1: d1Status,
-      queues: c.env.NOTIFY_QUEUE ? 'ready' : 'disabled',
-      r2: c.env.MEDIA ? 'ready' : 'not_bound',
-      timestamp: new Date().toISOString(),
+    domain: 'notify.supletivo.net.br',
+    endpoints: {
+      health: '/health',
+      notify: '/notify',
+      v1_send: '/v1/send',
+      media: '/media/:key',
+      mcp: '/mcp',
     },
   });
 });
 
-app.get('/v1/health', (c) => c.redirect('/health'));
+// ── 1. Health Check (Edge + D1 + R2 + AI) ──────────────────────────────────
+app.get('/health', async (c) => {
+  const checks: Record<string, any> = {
+    edge: 'healthy',
+    timestamp: new Date().toISOString(),
+    environment: c.env.ENVIRONMENT || 'production',
+  };
 
-// ── POST /notify e POST /v1/send ──────────────────────────────────────────────
+  // D1 Probe
+  try {
+    const d1Result = await c.env.DB.prepare('SELECT 1 as alive').first();
+    checks.d1 = d1Result?.alive === 1 ? 'connected' : 'error';
+  } catch (err: any) {
+    checks.d1 = `error: ${err.message}`;
+  }
 
-const handleNotify = async (c: any) => {
+  // R2 Probe
+  try {
+    checks.r2 = c.env.MEDIA ? 'connected' : 'not_bound';
+  } catch (err: any) {
+    checks.r2 = `error: ${err.message}`;
+  }
+
+  // Workers AI Probe
+  try {
+    checks.workers_ai = c.env.AI ? 'ready' : 'not_bound';
+  } catch (err: any) {
+    checks.workers_ai = `error: ${err.message}`;
+  }
+
+  return c.json({ status: 'ok', checks });
+});
+
+// ── 2. R2 Media Object Serving (Zero Egress) ──────────────────────────────
+app.get('/media', (c) => c.text('Key required', 400));
+app.get('/media/*', async (c) => {
+  const key = c.req.path.replace(/^\/media\/?/, '');
+  if (!key || key.includes('..') || key.startsWith('/')) {
+    return c.text('Key required or invalid', 400);
+  }
+
+  if (!c.env.MEDIA) return c.json({ error: 'R2 media bucket not bound' }, 503);
+  const object = await c.env.MEDIA.get(key);
+  if (!object) {
+    return c.text('Object Not Found', 404);
+  }
+
+  const headers = new Headers();
+  object.writeHttpMetadata(headers);
+  headers.set('etag', object.httpEtag);
+  headers.set('Cache-Control', 'public, max-age=31536000, immutable');
+
+  return new Response(object.body, { headers });
+});
+
+// ── 3. Edge Notification Ingestion (/notify & /v1/send) ───────────────────
+const handleSend = async (c: any) => {
   let body: any;
   try {
     body = await c.req.json();
@@ -280,270 +170,516 @@ const handleNotify = async (c: any) => {
     return c.json({ error: 'Invalid JSON payload' }, 400);
   }
 
-  const account = await resolveAccount(c.req.raw, c.env);
-  if (!account) {
-    return c.json({ error: 'Credencial de autenticacao invalida ou conta inexistente.' }, 401);
+  const recipient = body.recipient || body.whatsapp || body.phone || body.email || '';
+  const channel = body.channel || (body.whatsapp || body.phone ? 'whatsapp' : body.email ? 'email' : 'all');
+  const content = body.content || body.text || '';
+  const subject = body.subject || body.options?.subject || '';
+  const idempotency_key = body.idempotency_key || body.external_id || body.options?.external_id || null;
+
+  if (!recipient || !content) {
+    return c.json({ error: 'Missing mandatory fields: recipient/whatsapp/email and content/text are required' }, 400);
+  }
+  if (!c.env.BACKEND_ORIGIN) {
+    return c.json({ ok: false, status: 'failed', error: 'Notification origin is not configured' }, 503);
   }
 
-  const whatsapp = body.whatsapp || body.phone || null;
-  const email = body.email || null;
-  const content = (body.content || body.text || '').trim();
-  const subject = body.subject || body.options?.subject || 'Supletivo Brasil';
-  const isOtp = body.is_otp === true || body.caller === 'users.auth.otp' || body.options?.is_otp === true;
-  const runSync = isOtp || body.run_sync === true || body.options?.run_sync === true;
-  const extId = body.external_id || body.idempotency_key || body.options?.external_id || crypto.randomUUID();
+  const accountSlug = c.req.header('X-Account-Slug') || body.account_id || 'default';
+  const caller = body.caller || body.options?.caller || body.extra?.caller || '';
+  const isOtp =
+    caller === 'users.auth.otp' ||
+    body.is_otp === true ||
+    body.options?.is_otp === true ||
+    body.extra?.is_otp === true;
+  const isSynchronous = isOtp || body.run_sync === true || body.options?.run_sync === true;
 
-  if (!whatsapp && !email) {
-    return c.json({ detail: 'Informe ao menos um destino: whatsapp (telefone) e/ou email.' }, 400);
-  }
-  if (!content) {
-    return c.json({ detail: 'content é obrigatório.' }, 400);
-  }
+  // 1. Verificação de idempotência no D1 com suporte a cooldown inteligente de OTP (60s)
+  if (idempotency_key) {
+    const existing: any = await c.env.DB.prepare(
+      'SELECT response_json, created_at, expires_at, caller FROM idempotency_keys WHERE account_slug = ? AND key = ?'
+    )
+      .bind(accountSlug, idempotency_key)
+      .first();
 
-  const nowSec = Math.floor(Date.now() / 1000);
+    if (existing) {
+      const isExistingOtp = isOtp || existing.caller === 'users.auth.otp';
+      const rawDate = existing.created_at || '';
+      const isoDate = rawDate.includes('T') ? rawDate : rawDate.replace(' ', 'T') + 'Z';
+      const createdAtMs = new Date(isoDate).getTime();
+      const ageMs = Date.now() - createdAtMs;
 
-  // 1. Checagem de Idempotência e Cooldown OTP (60s)
-  const existingIdem: any = await c.env.DB.prepare(
-    `SELECT response_json, created_at, is_otp
-     FROM idempotency_keys
-     WHERE account_id = ? AND key = ?`
-  ).bind(account.id, extId).first();
-
-  if (existingIdem) {
-    const ageSec = nowSec - existingIdem.created_at;
-    if (existingIdem.is_otp === 1 && ageSec < 60) {
-      c.header('X-Idempotent-Replay', 'true');
-      c.header('X-OTP-Cooldown-Remaining', (60 - ageSec).toString());
-      return c.json(JSON.parse(existingIdem.response_json));
-    } else if (existingIdem.is_otp === 0) {
-      c.header('X-Idempotent-Replay', 'true');
-      return c.json(JSON.parse(existingIdem.response_json));
+      // Se for OTP: dentro de 60s retorna o replay. Passados 60s, permite novo envio legítimo.
+      if (isExistingOtp) {
+        if (ageMs < 60000) {
+          const cached = JSON.parse(existing.response_json);
+          c.header('X-Idempotent-Replay', 'true');
+          c.header('X-OTP-Cooldown-Remaining-S', Math.max(0, Math.ceil((60000 - ageMs) / 1000)).toString());
+          return c.json(cached);
+        }
+      } else {
+        const cached = JSON.parse(existing.response_json);
+        c.header('X-Idempotent-Replay', 'true');
+        return c.json(cached);
+      }
     }
   }
 
-  const channels: string[] = [];
-  if (whatsapp) channels.push('whatsapp');
-  if (email) channels.push('email');
+  // 2. Registro preliminar na borda (D1)
+  const notificationId = crypto.randomUUID();
+  const targetPath = c.req?.path?.startsWith('/notify') ? '/notify' : '/v1/send';
+  const dispatchPayload = originPayload(body, targetPath, notificationId);
 
-  // 2. Fast-Track Síncrono (OTP ou run_sync)
-  if (runSync || !c.env.NOTIFY_QUEUE) {
-    let waSent = false;
-    let mailSent = false;
-    let providerWaId: string | null = null;
-    let providerMailId: string | null = null;
-    let errorMsg = '';
-
-    if (whatsapp) {
-      const waRes = await sendEvolutionWhatsApp(c.env, {
-        number: whatsapp,
-        text: content,
-        options: body.options || body.extra,
-      });
-      waSent = waRes.success;
-      providerWaId = waRes.messageId || null;
-      if (!waRes.success) errorMsg += `WA: ${waRes.error}; `;
-    }
-
-    if (email) {
-      const tplRow: any = await c.env.DB.prepare(
-        `SELECT html FROM mail_templates WHERE account_id = ?`
-      ).bind(account.id).first();
-
-      let html = tplRow?.html || '<h1>{{title}}</h1><div>{{content}}</div>';
-      html = html.replace(/\{\{content\}\}/g, content).replace(/\{\{title\}\}/g, subject);
-
-      const mailRes = await sendCloudflareEmail(c.env, {
-        to: email,
-        subject,
-        html,
-      });
-      mailSent = mailRes.success;
-      providerMailId = mailRes.messageId || null;
-      if (!mailRes.success) errorMsg += `Mail: ${mailRes.error}; `;
-    }
-
-    const notifStatusWa = whatsapp ? (waSent ? 'sent' : 'failed') : 'skipped';
-    const notifStatusMail = email ? (mailSent ? 'sent' : 'failed') : 'skipped';
-
-    await c.env.DB.prepare(
-      `INSERT OR REPLACE INTO notifications (
-        id, account_id, external_id, caller, recipient_whatsapp, recipient_email,
-        content, payload_json, status_whatsapp, status_email, provider_wa_id,
-        provider_mail_id, error_message, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).bind(
-      extId,
-      account.id,
-      extId,
-      body.caller || 'notify',
-      whatsapp,
-      email,
-      content,
-      JSON.stringify(body),
-      notifStatusWa,
-      notifStatusMail,
-      providerWaId,
-      providerMailId,
-      errorMsg.trim() || null,
-      nowSec,
-      nowSec
-    ).run();
-
-    const responsePayload = {
-      external_id: extId,
-      account: account.slug,
-      channels,
-      status: (waSent || mailSent) ? 'sent' : 'failed',
-    };
-
-    await c.env.DB.prepare(
-      `INSERT OR REPLACE INTO idempotency_keys (
-        account_id, key, notification_id, is_otp, response_json, expires_at, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).bind(
-      account.id,
-      extId,
-      extId,
-      isOtp ? 1 : 0,
-      JSON.stringify(responsePayload),
-      nowSec + 86400,
-      nowSec
-    ).run();
-
-    return c.json(responsePayload);
-  }
-
-  // 3. Caminho Assíncrono via Cloudflare Queues
   await c.env.DB.prepare(
-    `INSERT OR REPLACE INTO notifications (
-      id, account_id, external_id, caller, recipient_whatsapp, recipient_email,
-      content, payload_json, status_whatsapp, status_email, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued', 'queued', ?, ?)`
-  ).bind(
-    extId,
-    account.id,
-    extId,
-    body.caller || 'notify',
-    whatsapp,
-    email,
-    content,
-    JSON.stringify(body),
-    nowSec,
-    nowSec
-  ).run();
+    `INSERT INTO notifications (id, account_slug, channel, recipient, subject, status, idempotency_key, payload_json)
+     VALUES (?, ?, ?, ?, ?, 'queued', ?, ?)`
+  )
+    .bind(
+      notificationId,
+      accountSlug,
+      channel,
+      recipient,
+      subject,
+      idempotency_key,
+      JSON.stringify(dispatchPayload)
+    )
+    .run();
 
-  await c.env.NOTIFY_QUEUE.send({
-    id: extId,
-    account_id: account.id,
-    whatsapp,
-    email,
-    subject,
-    content,
-    options: body.options || body.extra,
-  });
+  const rejectDispatch = async (error: string, status = 503, details: Record<string, any> = {}) => {
+    await c.env.DB.prepare("UPDATE notifications SET status = 'failed' WHERE id = ?")
+      .bind(notificationId).run();
+    return c.json({ ...details, ok: false, status: details.status || 'failed', error }, status);
+  };
 
-  return c.json({
-    external_id: extId,
-    account: account.slug,
-    channels,
-    status: 'queued',
-  }, 202);
+  // 3. Encaminhamento assíncrono via Cloudflare Queue (ou direto ao Proxmox via Tunnel)
+  let backendResult: any = { status: 'queued', notification_id: notificationId };
+  const shouldEnqueue = !isSynchronous && (body.enqueue === true || body.options?.enqueue === true || body.async === true);
+
+  if (shouldEnqueue && c.env.NOTIFY_QUEUE) {
+    try {
+      await c.env.NOTIFY_QUEUE.send({
+        notification_id: notificationId,
+        account_slug: accountSlug,
+        channel,
+        recipient,
+        subject,
+        payload: dispatchPayload,
+        is_otp: isOtp,
+        target_path: targetPath,
+        timestamp: new Date().toISOString(),
+      });
+      backendResult = {
+        status: 'queued',
+        notification_id: notificationId,
+        external_id: notificationId,
+        queue: 'notify-events',
+      };
+    } catch {
+      return rejectDispatch('Notification queue is unavailable');
+    }
+  } else if (c.env.BACKEND_ORIGIN) {
+    try {
+      const backendUrl = `${c.env.BACKEND_ORIGIN.replace(/\/$/, '')}${targetPath}`;
+      const backendHeaders: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'X-Notification-ID': notificationId,
+        'X-Account-Slug': accountSlug,
+      };
+
+      if (isOtp) {
+        backendHeaders['X-Priority-Queue'] = 'fast-track';
+      }
+
+      const auth = c.req.header('Authorization');
+      if (auth) backendHeaders['Authorization'] = auth;
+
+      if (c.env.BACKEND_SERVICE_TOKEN) {
+        backendHeaders['CF-Access-Client-Secret'] = c.env.BACKEND_SERVICE_TOKEN;
+      }
+
+      const resp = await fetch(backendUrl, {
+        method: 'POST',
+        headers: backendHeaders,
+        body: JSON.stringify(dispatchPayload),
+        signal: AbortSignal.timeout(10000),
+      });
+
+      if (resp.ok) {
+        backendResult = await resp.json();
+        try {
+          if (c.executionCtx && c.env.DB) {
+            c.executionCtx.waitUntil(
+              c.env.DB.prepare("UPDATE notifications SET status = 'dispatched' WHERE id = ?")
+                .bind(notificationId)
+                .run()
+            );
+          }
+        } catch {
+          // ExecutionContext pode não estar disponível em ambientes de teste direto
+        }
+      } else {
+        if (resp.status === 400 || resp.status === 422) {
+          return rejectDispatch('Notification rejected by origin', resp.status);
+        }
+        // Se for OTP, falha imediatamente com 502 para acionar retry no chamador
+        if (isSynchronous) {
+          const details = (await resp.json().catch(() => ({}))) as Record<string, any>;
+          return rejectDispatch(isOtp ? 'OTP dispatch failed at backend origin' : 'Synchronous dispatch failed at backend origin', isOtp ? 502 : 503, details);
+        }
+
+        // Se backend falhar e não for OTP, tenta enfileirar para absorção resiliente
+        if (c.env.NOTIFY_QUEUE) {
+          await c.env.NOTIFY_QUEUE.send({
+            notification_id: notificationId,
+            account_slug: accountSlug,
+            channel,
+            recipient,
+            subject,
+            payload: dispatchPayload,
+            is_otp: false,
+            target_path: targetPath,
+            timestamp: new Date().toISOString(),
+          });
+          backendResult = {
+            status: 'queued',
+            notification_id: notificationId,
+            external_id: notificationId,
+            queue: 'notify-events-fallback',
+          };
+        } else {
+          return rejectDispatch('Notification origin is unavailable');
+        }
+      }
+    } catch (err: any) {
+      if (isSynchronous) {
+        return rejectDispatch(isOtp ? 'OTP dispatch failed at backend origin' : 'Synchronous dispatch failed at backend origin', isOtp ? 502 : 503);
+      }
+
+      if (c.env.NOTIFY_QUEUE) {
+        try {
+          await c.env.NOTIFY_QUEUE.send({
+            notification_id: notificationId,
+            account_slug: accountSlug,
+            channel,
+            recipient,
+            subject,
+            payload: dispatchPayload,
+            is_otp: false,
+            target_path: targetPath,
+            timestamp: new Date().toISOString(),
+          });
+          backendResult = {
+            status: 'queued',
+            notification_id: notificationId,
+            external_id: notificationId,
+            queue: 'notify-events-fallback',
+          };
+        } catch {
+          return rejectDispatch('Notification origin and queue are unavailable');
+        }
+      } else {
+        return rejectDispatch('Notification origin is unavailable');
+      }
+    }
+  }
+
+  const responsePayload = {
+    ok: true,
+    notification_id: notificationId,
+    external_id: notificationId,
+    status: backendResult.status || (isSynchronous ? 'sent' : 'queued'),
+    timestamp: new Date().toISOString(),
+    ...backendResult,
+  };
+
+  // 4. Salvar resposta para idempotência se chave fornecida (com TTL de 60s se for OTP)
+  if (idempotency_key) {
+    const expiresAt = isOtp ? new Date(Date.now() + 60000).toISOString() : null;
+    await c.env.DB.prepare(
+      `INSERT OR REPLACE INTO idempotency_keys (key, account_slug, response_json, caller, created_at, expires_at)
+       VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, ?)`
+    )
+      .bind(idempotency_key, accountSlug, JSON.stringify(responsePayload), caller || null, expiresAt)
+      .run();
+  }
+
+  const statusCode = responsePayload.status === 'queued' || responsePayload.status === 'queued_edge' ? 202 : 200;
+  return c.json(responsePayload, statusCode);
 };
 
-app.post('/notify', handleNotify);
-app.post('/v1/send', handleNotify);
+app.post('/notify', handleSend);
+app.post('/v1/send', handleSend);
 
-// ── POST /v1/phone/check ──────────────────────────────────────────────────────
-
-app.post('/v1/phone/check', async (c) => {
-  const body: any = await c.req.json().catch(() => ({}));
-  const numbers: string[] = body.numbers || [];
-  if (!Array.isArray(numbers) || numbers.length === 0) {
-    return c.json({ error: 'numbers array required' }, 400);
+// ── 4. Edge Model Context Protocol (MCP JSON-RPC) ──────────────────────────
+app.post('/mcp', async (c) => {
+  let rpc: any;
+  try {
+    rpc = await c.req.json();
+  } catch {
+    return c.json({ jsonrpc: '2.0', error: { code: -32700, message: 'Parse error' }, id: null }, 400);
   }
 
-  const results = numbers.map((n) => ({
-    number: normalizeBrPhone(n),
-    exists: true,
-  }));
+  const { method, params = {}, id } = rpc;
 
-  return c.json(results);
+  if (method === 'initialize') {
+    return c.json({
+      jsonrpc: '2.0',
+      id,
+      result: {
+        protocolVersion: '2024-11-05',
+        capabilities: { tools: {} },
+        serverInfo: { name: 'notify-edge-mcp', version: '1.0.0' },
+      },
+    });
+  }
+
+  if (method === 'tools/list') {
+    return c.json({
+      jsonrpc: '2.0',
+      id,
+      result: {
+        tools: [
+          {
+            name: 'notify_send',
+            description: 'Envia notificação multicanal (WhatsApp, E-mail) na borda Cloudflare.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                channel: { type: 'string', enum: ['whatsapp', 'email', 'all'] },
+                recipient: { type: 'string' },
+                content: { type: 'string' },
+                subject: { type: 'string' },
+                template_slug: { type: 'string' },
+                idempotency_key: { type: 'string' },
+                extra: { type: 'object' },
+              },
+              required: ['channel', 'recipient'],
+            },
+          },
+          {
+            name: 'notify_status',
+            description: 'Consulta o status de entrega de uma notificação pelo ID.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                notification_id: { type: 'string' },
+              },
+              required: ['notification_id'],
+            },
+          },
+        ],
+      },
+    });
+  }
+
+  if (method === 'tools/call') {
+    const toolName = params.name;
+    const args = params.arguments || {};
+
+    if (toolName === 'notify_send') {
+      const mockReq = {
+        req: {
+          path: '/v1/send',
+          json: async () => args,
+          header: (name: string) => c.req.header(name),
+        },
+        env: c.env,
+        header: () => {},
+        json: (data: any, status = 200) => ({ data, status }),
+      };
+      const res: any = await handleSend(mockReq as any);
+      return c.json({
+        jsonrpc: '2.0',
+        id,
+        result: { content: [{ type: 'text', text: JSON.stringify(res.data) }] },
+      });
+    }
+
+    if (toolName === 'notify_status') {
+      const row = await c.env.DB.prepare('SELECT * FROM notifications WHERE id = ?')
+        .bind(args.notification_id)
+        .first();
+
+      return c.json({
+        jsonrpc: '2.0',
+        id,
+        result: {
+          content: [
+            {
+              type: 'text',
+              text: row ? JSON.stringify(row) : JSON.stringify({ error: 'Notification not found' }),
+            },
+          ],
+        },
+      });
+    }
+
+    return c.json({
+      jsonrpc: '2.0',
+      id,
+      error: { code: -32601, message: `Unknown tool: ${toolName}` },
+    });
+  }
+
+  return c.json({
+    jsonrpc: '2.0',
+    id,
+    error: { code: -32601, message: `Method not found: ${method}` },
+  });
 });
 
-// ── Webhook da Evolution Go (Recibos de Entrega e Inbound) ────────────────────
-
-app.post('/webhook/evolution/:instance', async (c) => {
-  const payload: any = await c.req.json().catch(() => ({}));
-  const eventType = (payload.event || payload.type || '').toUpperCase();
-  const nowSec = Math.floor(Date.now() / 1000);
-
-  if (eventType === 'RECEIPT' || eventType === 'MESSAGES_UPDATE') {
-    const data = payload.data || {};
-    const messageIds: string[] = data.MessageIDs || [data.key?.id || data.id].filter(Boolean);
-    const receiptType = (data.Type || data.status || '').toLowerCase();
-
-    let targetStatus = 'delivered';
-    if (receiptType === 'read' || receiptType === 'played' || receiptType === '3' || receiptType === '4') {
-      targetStatus = 'read';
-    }
-
-    for (const msgId of messageIds) {
-      await c.env.DB.prepare(
-        `UPDATE notifications
-         SET status_whatsapp = ?, updated_at = ?
-         WHERE provider_wa_id = ?`
-      ).bind(targetStatus, nowSec, msgId).run();
-    }
+// ── 5. Delivery Summary Report Endpoint (Workers Paid CPU & D1) ───────────
+app.get('/reports/delivery-summary', async (c) => {
+  if (!c.env.DB) {
+    return c.json({ error: 'Database not available' }, 503);
   }
+  const accountSlug = c.req.query('account') || 'default';
+  const hours = Number(c.req.query('hours') || 24);
 
-  if (eventType === 'MESSAGES_UPSERT' || eventType === 'MESSAGES.UPSERT') {
-    const data = payload.data || {};
-    if (!data.key?.fromMe) {
-      const sender = data.key?.remoteJid?.split('@')[0] || '';
-      const text = data.message?.conversation || data.message?.extendedTextMessage?.text || '';
-      const id = crypto.randomUUID();
-
-      await c.env.DB.prepare(
-        `INSERT INTO inbound_events (id, account_id, channel, sender, message_text, raw_payload, created_at)
-         VALUES (?, 'default', 'whatsapp', ?, ?, ?, ?)`
-      ).bind(id, sender, text, JSON.stringify(payload), nowSec).run();
-    }
-  }
-
-  return c.json({ ok: true });
+  const query = `
+    SELECT channel, status, COUNT(*) as count 
+    FROM notifications 
+    WHERE account_slug = ? AND created_at >= datetime('now', '-' || ? || ' hours')
+    GROUP BY channel, status
+  `;
+  const result = await c.env.DB.prepare(query).bind(accountSlug, hours).all();
+  return c.json({ account: accountSlug, period_hours: hours, metrics: result.results || [] });
 });
 
-// ── Consumer da Cloudflare Queue ──────────────────────────────────────────────
-
-export async function queueHandler(batch: MessageBatch<any>, env: Env, ctx?: ExecutionContext) {
-  for (const message of batch.messages) {
-    const item = message.body;
-    try {
-      if (item.whatsapp) {
-        await sendEvolutionWhatsApp(env, {
-          number: item.whatsapp,
-          text: item.content,
-          options: item.options,
-        });
-      }
-      if (item.email) {
-        await sendCloudflareEmail(env, {
-          to: item.email,
-          subject: item.subject || 'Supletivo Brasil',
-          html: item.content,
-        });
-      }
-      message.ack();
-    } catch (err) {
-      message.retry();
-    }
+// ── 5.1 Fallback: Encaminhar rotas não tratadas na borda para a origem Django (Azure Core) ──
+app.all('*', async (c) => {
+  if (!c.env.BACKEND_ORIGIN) {
+    return c.json({ error: 'Backend origin not configured' }, 503);
   }
-}
+  const targetUrl = new URL(c.req.path + (new URL(c.req.url).search), c.env.BACKEND_ORIGIN);
+  const headers = new Headers(c.req.raw.headers);
+  headers.set('host', targetUrl.host);
+  headers.set('x-forwarded-host', c.req.header('host') || 'notify.supletivo.net.br');
+  headers.set('x-forwarded-proto', 'https');
+  const body = ['GET', 'HEAD'].includes(c.req.method) ? undefined : await c.req.raw.arrayBuffer();
+  try {
+    const res = await fetch(targetUrl.toString(), {
+      method: c.req.method,
+      headers,
+      body,
+      redirect: 'manual',
+    });
+    const responseHeaders = new Headers(res.headers);
+    responseHeaders.delete('content-encoding');
+    responseHeaders.delete('content-length');
+    return new Response(res.body, {
+      status: res.status,
+      statusText: res.statusText,
+      headers: responseHeaders,
+    });
+  } catch (err: any) {
+    return c.json({ error: 'Backend origin unavailable', detail: err.message }, 502);
+  }
+});
 
-// ── Scheduled Cron Handler ────────────────────────────────────────────────────
+// ── 6. Cloudflare Queue Consumer Handler (Workers Paid Enhanced) ───────────
+export const queueHandler = async (
+  batch: MessageBatch<NotifyQueueMessage>,
+  env: Env,
+  ctx: ExecutionContext
+): Promise<void> => {
+  // 1. Processamento específico da Dead Letter Queue (DLQ)
+  if (batch.queue === 'notify-events-dlq') {
+    const deadStatements: D1PreparedStatement[] = [];
+    for (const msg of batch.messages) {
+      console.error(`[DLQ ALERT] Notification failed: ${msg.body.notification_id}`);
+      if (env.DB) {
+        deadStatements.push(
+          env.DB.prepare("UPDATE notifications SET status = 'dead_letter' WHERE id = ?")
+            .bind(msg.body.notification_id)
+        );
+      }
+      msg.ack(); // Confirma na DLQ para não reter indefinidamente após auditoria
+    }
+    if (deadStatements.length > 0 && env.DB) {
+      ctx.waitUntil(env.DB.batch(deadStatements));
+    }
+    return;
+  }
 
+  // 2. Processamento da fila notify-events
+  if (!env.BACKEND_ORIGIN) {
+    batch.retryAll();
+    return;
+  }
+
+  const successIds: string[] = [];
+  const failedIds: string[] = [];
+
+  await Promise.allSettled(
+    batch.messages.map(async (message) => {
+      const item = message.body;
+      try {
+        const targetPath = item.target_path || '/v1/send';
+        const backendUrl = `${env.BACKEND_ORIGIN.replace(/\/$/, '')}${targetPath}`;
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json',
+          'X-Notification-ID': item.notification_id,
+          'X-Account-Slug': item.account_slug,
+        };
+
+        if (env.NOTIFY_API_KEY) {
+          headers['Authorization'] = `Bearer ${env.NOTIFY_API_KEY}`;
+        } else if (item.auth_header) {
+          // Compatibility for messages accepted before credentials left the queue payload.
+          headers['Authorization'] = item.auth_header;
+        }
+
+        if (item.is_otp) {
+          headers['X-Priority-Queue'] = 'fast-track';
+        }
+
+        if (env.BACKEND_SERVICE_TOKEN) {
+          headers['CF-Access-Client-Secret'] = env.BACKEND_SERVICE_TOKEN;
+        }
+
+        // Garante atribuição multi-tenant no corpo JSON para o auth do backend
+        const dispatchPayload = {
+          ...originPayload(item.payload, targetPath, item.notification_id),
+          account_id: item.payload?.account_id || item.account_slug,
+        };
+
+        const resp = await fetch(backendUrl, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(dispatchPayload),
+          signal: AbortSignal.timeout(10000),
+        });
+
+        if (resp.ok) {
+          message.ack();
+          successIds.push(item.notification_id);
+        } else if ([401, 403, 404, 408, 429].includes(resp.status) || resp.status >= 500) {
+          // Rate limiting (429), timeout (408) ou falha de servidor (5xx): reagenda na fila
+          message.retry();
+        } else {
+          // Erro 4xx de cliente/validação (400, 404, 422): ack para não reter na fila
+          message.ack();
+          failedIds.push(item.notification_id);
+        }
+      } catch (err) {
+        // Erro de rede ou timeout: reagenda
+        message.retry();
+      }
+    })
+  );
+
+  // 3. Batch D1 updates (Workers Paid otimizado)
+  if (env.DB && (successIds.length > 0 || failedIds.length > 0)) {
+    const batchUpdates: D1PreparedStatement[] = [
+      ...successIds.map((id) => env.DB.prepare("UPDATE notifications SET status = 'dispatched' WHERE id = ?").bind(id)),
+      ...failedIds.map((id) => env.DB.prepare("UPDATE notifications SET status = 'failed' WHERE id = ?").bind(id)),
+    ];
+    ctx.waitUntil(env.DB.batch(batchUpdates));
+  }
+};
+
+// ── 7. Scheduled Cron Handler (Idempotency Cleanup & Reconciliation) ───────
 export const scheduledHandler = async (
-  event: any,
+  event: ScheduledEvent,
   env: Env,
   ctx: ExecutionContext
 ): Promise<void> => {
@@ -551,16 +687,33 @@ export const scheduledHandler = async (
 
   ctx.waitUntil(
     (async () => {
-      const nowSec = Math.floor(Date.now() / 1000);
+      // 1. Limpar idempotências expiradas (ex: OTPs com TTL 60s)
       await env.DB.prepare(
-        'DELETE FROM idempotency_keys WHERE expires_at IS NOT NULL AND expires_at < ?'
-      ).bind(nowSec).run();
+        "DELETE FROM idempotency_keys WHERE expires_at IS NOT NULL AND expires_at < CURRENT_TIMESTAMP"
+      ).run();
+
+      // 2. Limpar notificações com mais de 60 dias
+      await env.DB.prepare(
+        "DELETE FROM notifications WHERE created_at < datetime('now', '-60 days')"
+      ).run();
     })()
   );
 };
 
+import { handleIncomingEmail } from './email-handler';
+// removed agents SDK
+// removed notify-agent
+
 export default {
-  fetch: app.fetch,
+  fetch: async (request: Request, env: Env, ctx: ExecutionContext) => {
+    if (new URL(request.url).pathname.startsWith('/agents/')) {
+      const rejection = await authorize(request, env);
+      if (rejection) return rejection;
+    }
+    // removed routeAgentRequest
+    return app.fetch(request, env, ctx);
+  },
   queue: queueHandler,
+  email: handleIncomingEmail,
   scheduled: scheduledHandler,
 };
