@@ -12,22 +12,19 @@ routes = [
 [vars]
 ENVIRONMENT = "production"
 BACKEND_ORIGIN = "https://notify-backend.supletivo.net.br"
+EVOLUTION_URL = "https://evolution.supletivo.net.br"
 
 [[d1_databases]]
 binding = "DB"
 database_name = "notify-db"
-database_id = "9f60bd23-8df1-4311-ad1f-7fc296bb0a49"
+database_id = "26eb954c-6172-45a5-8f5a-d1c176b10a35"
 
-# [[r2_buckets]]
-# binding = "MEDIA"
-# bucket_name = "notify-media"
+[[r2_buckets]]
+binding = "MEDIA"
+bucket_name = "supletivo-media"
 
 [ai]
 binding = "AI"
-
-[[hyperdrive]]
-binding = "HYPERDRIVE"
-id = "d13fec466a424ac59c25399ee8628d4a"
 
 # ── Cloudflare Queues (Zero-Cost Async Decoupling - Workers Paid) ────────────
 [[queues.producers]]
@@ -36,7 +33,7 @@ queue = "notify-events"
 
 [[queues.consumers]]
 queue = "notify-events"
-max_batch_size = 50
+max_batch_size = 25
 max_batch_timeout = 5
 max_retries = 4
 retry_delay = 15
@@ -60,15 +57,4 @@ head_sampling_rate = 1.0
 # ── Cloudflare Email Sending ────────────────────────────────
 [[send_email]]
 name = "EMAIL"
-
-# ── Cloudflare Agents SDK (Durable Objects com SQLite) ──────────
-[durable_objects]
-bindings = [
-  { name = "NotifyAgent", class_name = "NotifyAgent" }
-]
-
-[[migrations]]
-tag = "v1"
-new_sqlite_classes = ["NotifyAgent"]
-
 
