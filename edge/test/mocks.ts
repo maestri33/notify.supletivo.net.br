@@ -4,6 +4,7 @@ import type { Env, NotifyQueueMessage } from '../src/index';
 export type MockD1 = {
   notifications: Map<string, any>;
   idempotency_keys: Map<string, any>;
+  api_keys: Map<string, any>;
   shouldFail: boolean;
   db: any;
 };
@@ -11,6 +12,7 @@ export type MockD1 = {
 export function createMockD1(): MockD1 {
   const notifications = new Map<string, any>();
   const idempotency_keys = new Map<string, any>();
+  const api_keys = new Map<string, any>();
   const state = { shouldFail: false };
 
   const db = {
@@ -30,6 +32,11 @@ export function createMockD1(): MockD1 {
           }
           if (sql.includes('SELECT 1 as alive')) {
             return { alive: 1 } as unknown as T;
+          }
+          if (sql.includes('FROM api_keys')) {
+            const [hash] = boundArgs;
+            const row = api_keys.get(hash);
+            return (row || null) as unknown as T;
           }
           if (sql.includes('FROM idempotency_keys')) {
             let accountSlug = '';
@@ -119,6 +126,7 @@ export function createMockD1(): MockD1 {
   return {
     notifications,
     idempotency_keys,
+    api_keys,
     get shouldFail() {
       return state.shouldFail;
     },
@@ -158,7 +166,7 @@ export function createMockR2() {
       store.set(key, {
         body: data,
         httpMetadata: options?.httpMetadata,
-        etag: `"mock-etag-${Date.now()}"`,
+        etag: `\"mock-etag-${Date.now()}\"`,
       });
       return { key };
     },

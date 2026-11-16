@@ -89,15 +89,15 @@ export async function analyzeEmailWithAI(
     };
   }
 
-  const prompt = `Você é o triador de IA oficial da plataforma educacional Supletivo.net.br.
-Analise o email abaixo recebido de um aluno ou interessado.
+  const prompt = `Você é o triador de IA do serviço de mensagens e atendimento multicanal Notify.
+Analise o email abaixo recebido para classificação e roteamento.
 Classifique a intenção principal estritamente em uma destas opções:
 ["duvida_matricula", "envio_documentos", "comprovante_pagamento", "suporte", "spam", "outro"].
 
 Extraia também:
-- CPF do aluno (se presente, formatado ou apenas dígitos)
+- CPF / Documento (se presente, formatado ou apenas dígitos)
 - Telefone / WhatsApp de contato
-- Nome do aluno
+- Nome do remetente
 - Um breve resumo de 1 linha
 - Uma sugestão educada e prestativa de resposta inicial em português do Brasil.
 
@@ -109,7 +109,7 @@ Responda OBRIGATORIAMENTE em formato JSON válido com o seguinte formato exato:
 {
   "intent": "duvida_matricula",
   "confidence": 0.95,
-  "summary": "Dúvida sobre prazo de conclusão do supletivo",
+  "summary": "Resumo objetivo da solicitação",
   "extracted_entities": {
     "cpf": null,
     "phone": null,
@@ -210,8 +210,24 @@ export async function handleIncomingEmail(
   // 4. Executar Análise Inteligente via TypeSafe AI ou Workers AI
   const analysis = await analyzeEmailWithAI(env, subject, bodyText);
 
-  // 5. Determinar Conta / Tenant (slug padrão 'supletivo' ou extraído do domínio)
-  const accountSlug = 'supletivo';
+  // 5. Determinar Conta / Tenant pelo domínio ou destinatário (com fallback dinâmico)
+  let accountSlug = 'default';
+  const toDomain = toAddress.split('@')[1]?.toLowerCase();
+  if (toDomain && env.DB) {
+    try {
+      const slugCandidate = toDomain.split('.')[0];
+      const accRow: any = await env.DB.prepare(
+        'SELECT slug FROM accounts WHERE slug = ? OR webhook_url LIKE ? LIMIT 1'
+      ).bind(slugCandidate, `%${toDomain}%`).first();
+      if (accRow?.slug) {
+        accountSlug = accRow.slug;
+      } else if (slugCandidate && slugCandidate !== 'notify') {
+        accountSlug = slugCandidate;
+      }
+    } catch {
+      accountSlug = 'default';
+    }
+  }
 
   // 6. Persistir Thread e Inbound Email no D1
   if (env.DB) {
@@ -286,7 +302,7 @@ export async function handleIncomingEmail(
       extracted_entities: analysis.extracted_entities,
       attachments: attachmentsMeta,
       whatsapp_alert: isHighPriority ? {
-        text: `🚨 *Novo Email Prioritário Recebido*\n*De:* ${fromName || fromAddress}\n*Intenção:* ${analysis.intent}\n*Resumo:* ${analysis.summary}\n*CPF:* ${analysis.extracted_entities.cpf || 'Não informado'}`,
+        text: `🚨 *Novo Email Prioritário Recebido*\\n*De:* ${fromName || fromAddress}\\n*Intenção:* ${analysis.intent}\\n*Resumo:* ${analysis.summary}\\n*CPF:* ${analysis.extracted_entities.cpf || 'Não informado'}`,
       } : undefined,
     },
     timestamp: new Date().toISOString(),

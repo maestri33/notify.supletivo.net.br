@@ -45,6 +45,6 @@ describe('GET /health probe', () => {
     const body: any = await res.json();
     expect(body.status).toBe('ok');
     expect(body.service).toBe('notify-edge');
-    expect(body.domain).toBe('notify.supletivo.net.br');
+    expect(body.domain).toBe('notify.v7m.live');
   });
 });

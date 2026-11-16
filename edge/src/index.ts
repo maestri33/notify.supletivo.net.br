@@ -46,15 +46,45 @@ function originPayload(payload: Record<string, any>, targetPath: string, notific
 
 async function authorize(request: Request, env: Env): Promise<Response | null> {
   if (env.NOTIFY_REQUIRE_AUTH === false || env.NOTIFY_REQUIRE_AUTH === 'false') return null;
-  if (!env.NOTIFY_API_KEY) return Response.json({ error: 'Notification authentication is not configured' }, { status: 503 });
+  if (!env.NOTIFY_API_KEY) {
+    return Response.json({ error: 'Notification authentication is not configured' }, { status: 503 });
+  }
   const token = request.headers.get('Authorization') || '';
-  const expected = `Bearer ${env.NOTIFY_API_KEY}`;
+  if (!token.startsWith('Bearer ')) {
+    return Response.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+  const rawKey = token.replace(/^Bearer\s+/, '').trim();
+
+  // 1. Verificacao da chave mestra global (NOTIFY_API_KEY) via timing-safe SHA-256
   const encoder = new TextEncoder();
-  const [receivedHash, expectedHash] = await Promise.all([token, expected].map(async (value) =>
-    new Uint8Array(await crypto.subtle.digest('SHA-256', encoder.encode(value)))));
+  const [receivedHash, expectedHash] = await Promise.all([
+    rawKey,
+    env.NOTIFY_API_KEY,
+  ].map(async (value) => new Uint8Array(await crypto.subtle.digest('SHA-256', encoder.encode(value)))));
   let mismatch = 0;
   for (let i = 0; i < receivedHash.length; i++) mismatch |= receivedHash[i] ^ expectedHash[i];
-  return mismatch === 0 ? null : Response.json({ error: 'Unauthorized' }, { status: 401 });
+  if (mismatch === 0) return null;
+
+  // 2. Verificacao Multi-Tenant: autenticacao por API Key individual de cada plataforma no D1
+  if (env.DB) {
+    try {
+      const hashBuffer = await crypto.subtle.digest('SHA-256', encoder.encode(rawKey));
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      const keyHash = hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+
+      const row: any = await env.DB.prepare(
+        'SELECT id, account_id FROM api_keys WHERE key_hash = ? AND is_active = 1'
+      ).bind(keyHash).first();
+
+      if (row) {
+        return null;
+      }
+    } catch {
+      // Ignora erro se D1 estiver indisponivel
+    }
+  }
+
+  return Response.json({ error: 'Unauthorized' }, { status: 401 });
 }
 
 for (const path of ['/notify', '/v1/send', '/mcp', '/reports/*']) {
@@ -95,7 +125,7 @@ app.get('/', (c) => {
   return c.json({
     service: 'notify-edge',
     status: 'ok',
-    domain: 'notify.supletivo.net.br',
+    domain: 'notify.v7m.live',
     endpoints: {
       health: '/health',
       notify: '/notify',
@@ -552,7 +582,7 @@ app.all('*', async (c) => {
   const targetUrl = new URL(c.req.path + (new URL(c.req.url).search), c.env.BACKEND_ORIGIN);
   const headers = new Headers(c.req.raw.headers);
   headers.set('host', targetUrl.host);
-  headers.set('x-forwarded-host', c.req.header('host') || 'notify.supletivo.net.br');
+  headers.set('x-forwarded-host', c.req.header('host') || 'notify.v7m.live');
   headers.set('x-forwarded-proto', 'https');
   const body = ['GET', 'HEAD'].includes(c.req.method) ? undefined : await c.req.raw.arrayBuffer();
   try {
@@ -592,7 +622,7 @@ export const queueHandler = async (
             .bind(msg.body.notification_id)
         );
       }
-      msg.ack(); // Confirma na DLQ para não reter indefinidamente após auditoria
+      msg.ack();
     }
     if (deadStatements.length > 0 && env.DB) {
       ctx.waitUntil(env.DB.batch(deadStatements));
@@ -624,7 +654,6 @@ export const queueHandler = async (
         if (env.NOTIFY_API_KEY) {
           headers['Authorization'] = `Bearer ${env.NOTIFY_API_KEY}`;
         } else if (item.auth_header) {
-          // Compatibility for messages accepted before credentials left the queue payload.
           headers['Authorization'] = item.auth_header;
         }
 
@@ -636,7 +665,6 @@ export const queueHandler = async (
           headers['CF-Access-Client-Secret'] = env.BACKEND_SERVICE_TOKEN;
         }
 
-        // Garante atribuição multi-tenant no corpo JSON para o auth do backend
         const dispatchPayload = {
           ...originPayload(item.payload, targetPath, item.notification_id),
           account_id: item.payload?.account_id || item.account_slug,
@@ -653,15 +681,12 @@ export const queueHandler = async (
           message.ack();
           successIds.push(item.notification_id);
         } else if ([401, 403, 404, 408, 429].includes(resp.status) || resp.status >= 500) {
-          // Rate limiting (429), timeout (408) ou falha de servidor (5xx): reagenda na fila
           message.retry();
         } else {
-          // Erro 4xx de cliente/validação (400, 404, 422): ack para não reter na fila
           message.ack();
           failedIds.push(item.notification_id);
         }
       } catch (err) {
-        // Erro de rede ou timeout: reagenda
         message.retry();
       }
     })
@@ -687,12 +712,10 @@ export const scheduledHandler = async (
 
   ctx.waitUntil(
     (async () => {
-      // 1. Limpar idempotências expiradas (ex: OTPs com TTL 60s)
       await env.DB.prepare(
         "DELETE FROM idempotency_keys WHERE expires_at IS NOT NULL AND expires_at < CURRENT_TIMESTAMP"
       ).run();
 
-      // 2. Limpar notificações com mais de 60 dias
       await env.DB.prepare(
         "DELETE FROM notifications WHERE created_at < datetime('now', '-60 days')"
       ).run();
@@ -701,16 +724,9 @@ export const scheduledHandler = async (
 };
 
 import { handleIncomingEmail } from './email-handler';
-// removed agents SDK
-// removed notify-agent
 
 export default {
   fetch: async (request: Request, env: Env, ctx: ExecutionContext) => {
-    if (new URL(request.url).pathname.startsWith('/agents/')) {
-      const rejection = await authorize(request, env);
-      if (rejection) return rejection;
-    }
-    // removed routeAgentRequest
     return app.fetch(request, env, ctx);
   },
   queue: queueHandler,
