@@ -1,16 +1,33 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 
+export type NotifyQueueMessage = {
+  notification_id: string;
+  account_slug: string;
+  channel: string;
+  recipient: string;
+  subject?: string;
+  payload: Record<string, any>;
+  is_otp?: boolean;
+  auth_header?: string;
+  target_path?: string;
+  timestamp: string;
+};
+
 export type Env = {
   DB: D1Database;
   MEDIA: R2Bucket;
   AI?: any;
+  HYPERDRIVE?: any;
   NOTIFY_QUEUE?: Queue<any>;
   EMAIL?: any;
   ENVIRONMENT: string;
   EVOLUTION_URL?: string;
   EVOLUTION_API_KEY?: string;
   BACKEND_ORIGIN?: string;
+  BACKEND_SERVICE_TOKEN?: string;
+  NOTIFY_API_KEY?: string;
+  NOTIFY_REQUIRE_AUTH?: string | boolean;
   CF_ACCOUNT_ID?: string;
   CF_API_TOKEN?: string;
 };
@@ -56,7 +73,7 @@ async function resolveAccount(req: Request, env: Env): Promise<{ id: string; slu
 // ── Normalização de Telefone Brasileiro (DDI 55) ──────────────────────────────
 
 function normalizeBrPhone(phone: string): string {
-  const digits = phone.replace(/\D/g, '');
+  const digits = String(phone).replace(/\D/g, '');
   if (!digits.startsWith('55') || (digits.length !== 12 && digits.length !== 13)) {
     return digits;
   }
@@ -87,7 +104,6 @@ async function sendCloudflareEmail(
   const fromAddr = params.fromAddress || 'contato@supletivo.net.br';
   const fromName = params.fromName || 'Supletivo Brasil';
 
-  // Se tiver o binding nativo Worker Send Email
   if (env.EMAIL && typeof env.EMAIL.send === 'function') {
     try {
       await env.EMAIL.send({
@@ -199,8 +215,8 @@ async function sendEvolutionWhatsApp(
           run_sync: true,
         }),
       });
-      const data: any = await resp.json();
-      return { success: resp.ok, messageId: data.external_id };
+      const data: any = await resp.json().catch(() => ({}));
+      return { success: resp.ok, messageId: data.external_id || `wa-${Date.now()}` };
     }
 
     const resp = await fetch(`${baseUrl}${endpoint}`, {
@@ -499,7 +515,7 @@ app.post('/webhook/evolution/:instance', async (c) => {
 
 // ── Consumer da Cloudflare Queue ──────────────────────────────────────────────
 
-export async function queueHandler(batch: MessageBatch<any>, env: Env) {
+export async function queueHandler(batch: MessageBatch<any>, env: Env, ctx?: ExecutionContext) {
   for (const message of batch.messages) {
     const item = message.body;
     try {
@@ -524,7 +540,27 @@ export async function queueHandler(batch: MessageBatch<any>, env: Env) {
   }
 }
 
+// ── Scheduled Cron Handler ────────────────────────────────────────────────────
+
+export const scheduledHandler = async (
+  event: any,
+  env: Env,
+  ctx: ExecutionContext
+): Promise<void> => {
+  if (!env.DB) return;
+
+  ctx.waitUntil(
+    (async () => {
+      const nowSec = Math.floor(Date.now() / 1000);
+      await env.DB.prepare(
+        'DELETE FROM idempotency_keys WHERE expires_at IS NOT NULL AND expires_at < ?'
+      ).bind(nowSec).run();
+    })()
+  );
+};
+
 export default {
   fetch: app.fetch,
   queue: queueHandler,
+  scheduled: scheduledHandler,
 };
